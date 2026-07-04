@@ -30,6 +30,12 @@ from app.db.models import (
 )
 from app.db.session import get_sessionmaker
 from app.modules.accounts.service import decrypt_webhook_secret
+from app.modules.settings.service import (
+    KEY_N8N_WEBHOOK_SECRET,
+    KEY_N8N_WEBHOOK_URL,
+    get_setting,
+    get_setting_cached,
+)
 
 log = structlog.get_logger()
 
@@ -48,9 +54,15 @@ async def create_message_received_delivery(
     message: Message,
     attachment: Attachment | None,
 ) -> WebhookDelivery | None:
-    """Crea la fila de entrega (misma transacción que el mensaje). Devuelve
-    None si la cuenta no tiene webhook n8n configurado."""
-    if not account.n8n_inbound_webhook_url:
+    """Crea la fila de entrega (misma transacción que el mensaje).
+
+    URL destino: la de la cuenta si tiene una propia; si no, el webhook
+    GLOBAL de n8n (panel técnico). Sin ninguno de los dos → no se reenvía
+    (el mensaje igual queda persistido)."""
+    target_url = account.n8n_inbound_webhook_url or await get_setting(
+        session, KEY_N8N_WEBHOOK_URL
+    )
+    if not target_url:
         return None
 
     lead = await _find_active_lead(session, conversation.id)
@@ -91,6 +103,8 @@ async def create_message_received_delivery(
             "wamid": message.wamid,
             "type": message.type.value,
             "body": message.body,
+            # Payload crudo de WhatsApp, tal cual llegó de Meta
+            "raw": message.raw_payload,
             "waTimestamp": message.wa_timestamp.isoformat() if message.wa_timestamp else None,
             "attachments": (
                 [
@@ -111,7 +125,7 @@ async def create_message_received_delivery(
 
     delivery = WebhookDelivery(
         whatsapp_account_id=account.id,
-        target_url=account.n8n_inbound_webhook_url,
+        target_url=target_url,
         event_type=EVENT_MESSAGE_RECEIVED,
         payload=payload,
     )
@@ -151,7 +165,10 @@ async def handle_dispatch_n8n_event(payload: dict) -> None:
             "X-Event-Id": delivery.payload.get("eventId", str(delivery.id)),
             "X-Event-Type": delivery.event_type,
         }
-        secret = decrypt_webhook_secret(settings, account)
+        # Firma: secreto de la cuenta si tiene uno propio; si no, el global
+        secret = decrypt_webhook_secret(settings, account) or await get_setting_cached(
+            KEY_N8N_WEBHOOK_SECRET
+        )
         if secret:
             headers["X-Signature-256"] = sign_payload(secret, body)
 

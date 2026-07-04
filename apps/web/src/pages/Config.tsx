@@ -95,11 +95,14 @@ function PlatformTab() {
   const [data, setData] = useState<any>(null);
   const [appSecret, setAppSecret] = useState("");
   const [graphVersion, setGraphVersion] = useState("");
+  const [n8nUrl, setN8nUrl] = useState("");
+  const [n8nSecret, setN8nSecret] = useState("");
 
   const load = async () => {
     const d = await api.get<any>("/config/platform");
     setData(d);
     setGraphVersion(d.graphApiVersion);
+    setN8nUrl(d.n8nWebhookUrl ?? "");
   };
   useEffect(() => {
     load().catch(showError);
@@ -112,8 +115,11 @@ function PlatformTab() {
       await api.put("/config/platform", {
         appSecret: appSecret || undefined,
         graphApiVersion: graphVersion || undefined,
+        n8nWebhookUrl: n8nUrl !== (data.n8nWebhookUrl ?? "") ? n8nUrl : undefined,
+        n8nWebhookSecret: n8nSecret || undefined,
       });
       setAppSecret("");
+      setN8nSecret("");
       await load();
       window.alert("Guardado");
     } catch (e) {
@@ -159,6 +165,44 @@ function PlatformTab() {
         <label>
           Versión de Graph API
           <input value={graphVersion} onChange={(e) => setGraphVersion(e.target.value)} />
+        </label>
+      </div>
+
+      <h3>Webhook global hacia n8n</h3>
+      <p className="muted">
+        TODOS los mensajes entrantes (de todas las cuentas) se guardan y se reenvían a esta URL,
+        incluyendo el payload crudo de WhatsApp en <code className="k">message.raw</code>. Si una
+        cuenta define su propia URL, la pisa solo para esa cuenta.
+      </p>
+      <div className="form-grid">
+        <label>
+          URL del webhook de n8n (vacío = no reenviar)
+          <input
+            placeholder="https://n8n…/webhook/whatsapp-in"
+            value={n8nUrl}
+            onChange={(e) => setN8nUrl(e.target.value)}
+          />
+        </label>
+        <label>
+          Secreto HMAC {data.n8nWebhookSecretSet ? "✅ configurado" : "(opcional)"}
+          <div className="row">
+            <input
+              type="password"
+              style={{ flex: 1 }}
+              placeholder={data.n8nWebhookSecretSet ? "(reemplazar…)" : "firma X-Signature-256"}
+              value={n8nSecret}
+              onChange={(e) => setN8nSecret(e.target.value)}
+            />
+            <button
+              onClick={() => {
+                const s = crypto.randomUUID().replace(/-/g, "");
+                setN8nSecret(s);
+                window.alert(`Secreto generado (guardalo para validar la firma en n8n):\n\n${s}\n\nTocá Guardar para aplicarlo.`);
+              }}
+            >
+              Generar
+            </button>
+          </div>
         </label>
       </div>
       <button className="primary" onClick={save}>

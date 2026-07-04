@@ -82,8 +82,8 @@ docker compose logs migrate
 ### Puesta en marcha (5 minutos, desde el navegador)
 
 1. **Login**: `http://tu-servidor:8000` con `admin@crm.local` → cambiar contraseña.
-2. **⚙️ Panel técnico** (pide la `ADMIN_PANEL_PASSWORD` del `.env`) → pestaña **WhatsApp / Meta**: botón *Generar* verify token y pegar el **App Secret** de tu app de Meta (App settings → Basic).
-3. Pestaña **Cuentas**: crear la cuenta con nombre, WABA ID, **Phone Number ID**, número visible, **token permanente** (System User) y la **URL del webhook de tu n8n**. Botones *Probar* (valida el token contra la Graph API) y *Test n8n* (manda un evento de prueba).
+2. **⚙️ Panel técnico** (pide la `ADMIN_PANEL_PASSWORD` del `.env`) → pestaña **WhatsApp / Meta**: botón *Generar* verify token, pegar el **App Secret** de tu app de Meta (App settings → Basic) y la **URL del webhook global de tu n8n** (una sola para todas las cuentas).
+3. Pestaña **Cuentas**: crear la cuenta con nombre, WABA ID, **Phone Number ID**, número visible y **token permanente** (System User). Botones *Probar* (valida el token contra la Graph API) y *Test n8n* (manda un evento de prueba al webhook).
 4. **En Meta for Developers** → WhatsApp → Configuration → Webhook: URL `https://<tu-https>/api/v1/whatsapp/webhook` (puerto **8001**), el verify token del paso 2, y suscribirse al campo `messages`.
 5. Pestaña **API Keys** si necesitás más keys para n8n (se muestran una sola vez).
 
@@ -101,7 +101,7 @@ docker run -d --name cloudflared --restart unless-stopped --network crm_n8n_defa
 
 ### n8n (externo)
 
-- **Recibir mensajes**: nodo *Webhook* en n8n; su URL se pega en la cuenta (panel → Cuentas). El payload trae cuenta, contacto, conversación, lead y mensaje; viene firmado con `X-Signature-256` si configuraste el secreto.
+- **Recibir mensajes**: nodo *Webhook* en n8n; su URL se configura **una sola vez** en el panel (WhatsApp/Meta → *Webhook global hacia n8n*): todos los mensajes de todas las cuentas se guardan y se reenvían ahí. El payload trae cuenta, contacto, conversación, lead, mensaje **y `message.raw` con el payload crudo tal cual llegó de WhatsApp**; viene firmado con `X-Signature-256` si configurás el secreto. (Opcional: una cuenta puede definir su propia URL, que pisa la global solo para esa cuenta.)
 - **Responder**: nodo *HTTP Request* → `POST http://tu-servidor:8001/api/v1/hooks/n8n/messages` con header `Authorization: Bearer <api_key>` y body `{"conversationId": "...", "message": {"type": "text", "body": "..."}}`.
 - **Crear/actualizar lead + notas**: `POST .../hooks/n8n/leads` con `{"conversationId": "...", "externalKey": "...", "stageName": "Calificado", "notes": [{"externalKey": "resumen-ia", "body": "..."}]}` — repetir el mismo `externalKey` **edita** la nota en lugar de duplicarla.
 

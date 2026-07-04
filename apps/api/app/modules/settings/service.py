@@ -21,8 +21,11 @@ from app.db.session import get_sessionmaker
 KEY_WA_VERIFY_TOKEN = "whatsapp.verify_token"
 KEY_WA_APP_SECRET = "whatsapp.app_secret"
 KEY_GRAPH_VERSION = "whatsapp.graph_api_version"
+# Webhook GLOBAL hacia n8n: todas las cuentas lo usan salvo que definan uno propio
+KEY_N8N_WEBHOOK_URL = "n8n.webhook_url"
+KEY_N8N_WEBHOOK_SECRET = "n8n.webhook_secret"
 
-SECRET_KEYS = {KEY_WA_VERIFY_TOKEN, KEY_WA_APP_SECRET}
+SECRET_KEYS = {KEY_WA_VERIFY_TOKEN, KEY_WA_APP_SECRET, KEY_N8N_WEBHOOK_SECRET}
 DEFAULTS: dict[str, Any] = {KEY_GRAPH_VERSION: "v21.0"}
 
 _TTL_SECONDS = 60.0

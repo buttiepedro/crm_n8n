@@ -43,6 +43,8 @@ from app.modules.auth.service import revoke_all_sessions
 from app.modules.n8n_dispatch.service import EVENT_MESSAGE_RECEIVED
 from app.modules.settings.service import (
     KEY_GRAPH_VERSION,
+    KEY_N8N_WEBHOOK_SECRET,
+    KEY_N8N_WEBHOOK_URL,
     KEY_WA_APP_SECRET,
     KEY_WA_VERIFY_TOKEN,
     get_setting,
@@ -67,6 +69,9 @@ async def get_platform(db: AsyncSession = Depends(get_db)) -> dict:
         "verifyToken": verify_token,
         "appSecretSet": bool(app_secret),
         "graphApiVersion": await get_setting(db, KEY_GRAPH_VERSION, "v21.0"),
+        # Webhook GLOBAL hacia n8n (todas las cuentas; una cuenta puede pisarlo)
+        "n8nWebhookUrl": await get_setting(db, KEY_N8N_WEBHOOK_URL),
+        "n8nWebhookSecretSet": bool(await get_setting(db, KEY_N8N_WEBHOOK_SECRET)),
     }
 
 
@@ -74,6 +79,8 @@ class PlatformIn(CamelModel):
     verify_token: str | None = None
     app_secret: str | None = None
     graph_api_version: str | None = None
+    n8n_webhook_url: str | None = None  # "" → quitar
+    n8n_webhook_secret: str | None = None
 
 
 @router.put("/platform")
@@ -93,6 +100,14 @@ async def update_platform(
         await set_setting(db, KEY_GRAPH_VERSION, body.graph_api_version,
                           updated_by=auth.user.id)
         changed.append("graph_api_version")
+    if body.n8n_webhook_url is not None:
+        await set_setting(db, KEY_N8N_WEBHOOK_URL, body.n8n_webhook_url or None,
+                          updated_by=auth.user.id)
+        changed.append("n8n_webhook_url")
+    if body.n8n_webhook_secret is not None:
+        await set_setting(db, KEY_N8N_WEBHOOK_SECRET, body.n8n_webhook_secret or None,
+                          updated_by=auth.user.id)
+        changed.append("n8n_webhook_secret")
     await log_event(db, actor_type="user", actor_id=auth.user.id,
                     action="platform.settings_updated", metadata={"changed": changed})
     await db.commit()
@@ -262,8 +277,10 @@ async def test_account_webhook(
     account = await db.get(WhatsAppAccount, account_id)
     if account is None:
         raise NotFoundError("Cuenta inexistente")
-    if not account.n8n_inbound_webhook_url:
-        raise ConflictError("La cuenta no tiene webhook n8n configurado")
+    target_url = account.n8n_inbound_webhook_url or await get_setting(db, KEY_N8N_WEBHOOK_URL)
+    if not target_url:
+        raise ConflictError(
+            "Sin webhook n8n: configurar el global (WhatsApp/Meta) o uno en la cuenta")
     payload = {
         "event": EVENT_MESSAGE_RECEIVED, "eventId": str(uuid7()),
         "occurredAt": datetime.now(UTC).isoformat(), "test": True,
@@ -279,7 +296,7 @@ async def test_account_webhook(
                     "waTimestamp": datetime.now(UTC).isoformat(), "attachments": []},
     }
     delivery = WebhookDelivery(
-        whatsapp_account_id=account.id, target_url=account.n8n_inbound_webhook_url,
+        whatsapp_account_id=account.id, target_url=target_url,
         event_type=EVENT_MESSAGE_RECEIVED, payload=payload,
     )
     db.add(delivery)
