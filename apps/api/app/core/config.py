@@ -14,8 +14,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Único .env en la raíz del repo (compartido con docker compose); un
 # apps/api/.env local es opcional y pisa al de la raíz si existe.
+# En Docker el código vive en /app (sin repo alrededor): parent.parent nunca
+# falla y los .env inexistentes se ignoran (la config llega por env vars).
 _API_DIR = Path(__file__).resolve().parents[2]
-_REPO_ROOT = _API_DIR.parents[1]
+_REPO_ROOT = _API_DIR.parent.parent
 
 
 class Settings(BaseSettings):
