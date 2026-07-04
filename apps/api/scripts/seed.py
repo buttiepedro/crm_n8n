@@ -5,6 +5,7 @@ Uso:  uv run python scripts/seed.py   (requiere DB migrada: alembic upgrade head
 """
 
 import asyncio
+import os
 
 import sqlalchemy as sa
 
@@ -62,7 +63,12 @@ async def main() -> None:
                 phone_number_id="000000000000",
                 display_phone_number="+54 9 11 0000-0000",
                 access_token_ciphertext=b"pendiente",
-                n8n_inbound_webhook_url="http://localhost:5678/webhook/whatsapp-in",
+                # n8n es externo: N8N_WEBHOOK_BASE viene del .env
+                # (desde Docker, "localhost" no es tu máquina → host.docker.internal)
+                n8n_inbound_webhook_url=(
+                    os.environ.get("N8N_WEBHOOK_BASE", "http://localhost:5678")
+                    + "/webhook/whatsapp-in"
+                ),
             )
             session.add(account)
             await session.flush()

@@ -6,37 +6,51 @@ Plataforma en Google Cloud que actúa como intermediario entre la **WhatsApp Bus
 - **Backend**: FastAPI (Python 3.12) + SQLAlchemy 2.0 async + PostgreSQL 16 → [apps/api/](apps/api/)
 - **Frontend** (fase 3): React + Vite → `apps/web/`
 
-## Quickstart (desarrollo local)
+## Quickstart con Docker (recomendado)
 
-Requisitos: Python 3.12, [uv](https://docs.astral.sh/uv/), Docker (para PostgreSQL y n8n).
+Requisitos: Docker Desktop.
 
 ```bash
-# 1. Levantar PostgreSQL (y opcionalmente n8n)
-docker compose up -d db
-docker compose --profile n8n up -d      # opcional: n8n local en http://localhost:5678
+# 1. Configurar entorno (solo la primera vez)
+cp apps/api/.env.example apps/api/.env
+# completar los valores; la clave de cifrado se genera con:
+#   python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"
 
-# 2. Instalar dependencias del backend
-cd apps/api
-uv sync
+# 2. Levantar todo: DB → migraciones + seed (automático) → API → frontend
+docker compose up -d --build
 
-# 3. Configurar entorno
-cp .env.example .env                     # completar valores (ver comentarios)
-
-# 4. Crear el esquema de base de datos
-uv run alembic revision --autogenerate -m "init"
-uv run alembic upgrade head
-
-# 5. Datos de desarrollo (pipeline por defecto, cuenta de prueba, API key para n8n)
-uv run python scripts/seed.py
-
-# 6. Levantar la API
-uv run uvicorn app.main:app --reload --port 8080
+# La API key para n8n la imprime el seed (una sola vez):
+docker compose logs migrate
 ```
 
-- API docs (OpenAPI): http://localhost:8080/api/docs
+> **n8n es externo al stack**: la URL del webhook hacia tu n8n se define en
+> `N8N_WEBHOOK_BASE` del `.env` (y por cuenta, desde el panel en P4).
+
+- **Frontend**: http://localhost:8000 (nginx proxea `/api` al backend por la red interna)
+- **API directa**: http://localhost:8080 · docs OpenAPI en http://localhost:8080/api/docs
 - Health: `GET /api/v1/health` · Readiness: `GET /api/v1/health/ready`
-- Webhook de Meta: `GET|POST /api/v1/whatsapp/webhook` (usar túnel `cloudflared`/`ngrok` para pruebas con Meta)
+- Webhook de Meta: `GET|POST /api/v1/whatsapp/webhook` (usar túnel `cloudflared`/`ngrok` hacia el 8080)
 - Hooks para n8n: `POST /api/v1/hooks/n8n/messages` · `POST /api/v1/hooks/n8n/leads` (auth: `Authorization: Bearer <api_key>`)
+
+Las migraciones corren solas en el servicio `migrate` (`alembic upgrade head` + seed idempotente); la API arranca recién cuando terminan bien.
+
+## Desarrollo sin Docker (backend local)
+
+Requisitos: Python 3.12, [uv](https://docs.astral.sh/uv/), PostgreSQL accesible.
+
+```bash
+cd apps/api
+uv sync
+cp .env.example .env                     # DATABASE_URL apuntando a tu Postgres
+uv run alembic upgrade head
+uv run python scripts/seed.py
+uv run uvicorn app.main:app --reload --port 8080
+
+# Frontend en modo dev (hot reload, proxy /api → localhost:8080)
+cd ../web
+npm install
+npm run dev                              # http://localhost:8000
+```
 
 ## Tests y verificación sin base de datos
 

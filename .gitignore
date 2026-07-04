@@ -13,9 +13,10 @@ __pycache__/
 *.egg-info/
 dist/
 
-# Node (apps/web, fase 3)
+# Node (apps/web)
 node_modules/
 apps/web/dist/
+*.tsbuildinfo
 
 # Storage local de adjuntos (driver dev)
 storage/
