@@ -11,9 +11,10 @@ Plataforma en Google Cloud que actúa como intermediario entre la **WhatsApp Bus
 Requisitos: Docker Desktop.
 
 ```bash
-# 1. Configurar entorno (solo la primera vez)
-cp apps/api/.env.example apps/api/.env
-# completar los valores; la clave de cifrado se genera con:
+# 1. Configurar entorno — UN solo .env en la raíz (solo la primera vez)
+cp .env.example .env
+# completar los valores (cada variable tiene instrucciones en el archivo);
+# la clave de cifrado se genera con:
 #   python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"
 
 # 2. Levantar todo: DB → migraciones + seed (automático) → API → frontend
@@ -38,10 +39,11 @@ Las migraciones corren solas en el servicio `migrate` (`alembic upgrade head` + 
 
 Requisitos: Python 3.12, [uv](https://docs.astral.sh/uv/), PostgreSQL accesible.
 
+El backend lee el mismo `.env` de la raíz (un `apps/api/.env` local es opcional y lo pisa).
+
 ```bash
 cd apps/api
 uv sync
-cp .env.example .env                     # DATABASE_URL apuntando a tu Postgres
 uv run alembic upgrade head
 uv run python scripts/seed.py
 uv run uvicorn app.main:app --reload --port 8080

@@ -1,29 +1,28 @@
-# Stack de desarrollo:
-#   docker compose up -d --build
+# Stack de desarrollo — configuración en UN solo archivo: ./.env (raíz)
+#   cp .env.example .env   →   docker compose up -d --build
 #
-#   → db       PostgreSQL 16 (healthcheck)
+#   → db       PostgreSQL 16 (healthcheck; credenciales del .env)
 #   → migrate  alembic upgrade head + seed (corre una vez, al terminar arranca api)
-#   → api      FastAPI en la red interna (expuesto en :8080 para túneles/webhooks de Meta)
-#   → web      SPA React + nginx con proxy /api → api:8080  →  http://localhost:8000
+#   → api      FastAPI en la red interna (expuesto en ${API_PORT} para túneles/Meta)
+#   → web      SPA React + nginx con proxy /api → api:8080  →  http://localhost:${WEB_PORT}
 #
 # n8n es EXTERNO a este stack: la URL del webhook hacia n8n se configura por
-# cuenta (seed: variable N8N_WEBHOOK_BASE en apps/api/.env; luego, panel de
-# configuración). Requiere apps/api/.env (ver apps/api/.env.example).
+# cuenta (seed: N8N_WEBHOOK_BASE del .env; luego, panel de configuración).
 
 services:
   db:
     image: postgres:16
     container_name: crm_n8n_db
     environment:
-      POSTGRES_USER: crm
-      POSTGRES_PASSWORD: crm
-      POSTGRES_DB: crm
+      POSTGRES_USER: ${POSTGRES_USER:-crm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm}
+      POSTGRES_DB: ${POSTGRES_DB:-crm}
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U crm -d crm"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-crm} -d ${POSTGRES_DB:-crm}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -33,9 +32,9 @@ services:
     container_name: crm_n8n_migrate
     command: sh -c "alembic upgrade head && python scripts/seed.py"
     env_file:
-      - ./apps/api/.env
+      - ./.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://crm:crm@db:5432/crm
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-crm}:${POSTGRES_PASSWORD:-crm}@db:5432/${POSTGRES_DB:-crm}
     depends_on:
       db:
         condition: service_healthy
@@ -44,11 +43,11 @@ services:
     build: ./apps/api
     container_name: crm_n8n_api
     ports:
-      - "8080:8080"   # para túnel de webhooks de Meta y debugging directo
+      - "${API_PORT:-8080}:8080"   # túnel de webhooks de Meta / debugging directo
     env_file:
-      - ./apps/api/.env
+      - ./.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://crm:crm@db:5432/crm
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-crm}:${POSTGRES_PASSWORD:-crm}@db:5432/${POSTGRES_DB:-crm}
       STORAGE_LOCAL_PATH: /data/storage
     volumes:
       - attachments:/data/storage
@@ -61,7 +60,7 @@ services:
     build: ./apps/web
     container_name: crm_n8n_web
     ports:
-      - "8000:80"     # frontend: http://localhost:8000 (proxy /api → api:8080)
+      - "${WEB_PORT:-8000}:80"     # frontend (nginx proxea /api → api:8080)
     depends_on:
       - api
     restart: unless-stopped

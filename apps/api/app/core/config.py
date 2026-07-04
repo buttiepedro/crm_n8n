@@ -12,10 +12,15 @@ from typing import Literal
 from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Único .env en la raíz del repo (compartido con docker compose); un
+# apps/api/.env local es opcional y pisa al de la raíz si existe.
+_API_DIR = Path(__file__).resolve().parents[2]
+_REPO_ROOT = _API_DIR.parents[1]
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(_REPO_ROOT / ".env", _API_DIR / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
