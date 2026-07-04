@@ -43,8 +43,8 @@ Plataforma self-hosted que actúa como **intermediario entre la WhatsApp Busines
 ### Cómo funciona (flujos principales)
 
 - **Mensaje entrante**: Meta → `POST /api/v1/whatsapp/webhook` → se valida la firma → se responde 200 al instante → async: se persiste (idempotente por `wamid`), se descargan adjuntos, y se encola el reenvío firmado al webhook de n8n de esa cuenta (reintentos con backoff; cada intento queda en `webhook_deliveries`). Si n8n está caído, nada se pierde.
-- **Respuesta desde n8n**: `POST /hooks/n8n/messages` (API key) → valida ventana de 24 h → encola el envío a la Graph API → los estados (`sent/delivered/read`) llegan por webhook y actualizan el mensaje.
-- **Lead desde n8n**: `POST /hooks/n8n/leads` (API key) → upsert del lead por `externalKey` o conversación → mueve de etapa si corresponde (con historial) → upsert de notas internas por `externalKey` (crea o **edita**). Todo en una transacción.
+- **Respuesta desde n8n**: `POST /api/v1/hooks/n8n/messages` (API key) → valida ventana de 24 h → encola el envío a la Graph API → los estados (`sent/delivered/read`) llegan por webhook y actualizan el mensaje.
+- **Lead desde n8n**: `POST /api/v1/hooks/n8n/leads` (API key) → upsert del lead por `externalKey` o conversación → mueve de etapa si corresponde (con historial) → upsert de notas internas por `externalKey` (crea o **edita**). Todo en una transacción.
 - **Envío desde el CRM**: mismo pipeline que n8n (misma cola, misma ventana de 24 h), con el agente como autor.
 
 ## Configuración: qué va dónde
@@ -103,20 +103,20 @@ docker run -d --name cloudflared --restart unless-stopped --network crm_n8n_defa
 
 - **Recibir mensajes**: nodo *Webhook* en n8n; su URL se configura **una sola vez** en el panel (WhatsApp/Meta → *Webhook global hacia n8n*): todos los mensajes de todas las cuentas se guardan y se reenvían ahí. El payload trae cuenta, contacto, conversación, lead, mensaje **y `message.raw` con el payload crudo tal cual llegó de WhatsApp**; viene firmado con `X-Signature-256` si configurás el secreto. (Opcional: una cuenta puede definir su propia URL, que pisa la global solo para esa cuenta.)
 - **Responder**: nodo *HTTP Request* → `POST http://tu-servidor:8001/api/v1/hooks/n8n/messages` con header `Authorization: Bearer <api_key>` y body `{"conversationId": "...", "message": {"type": "text", "body": "..."}}`.
-- **Crear/actualizar lead + notas**: `POST .../hooks/n8n/leads` con `{"conversationId": "...", "externalKey": "...", "stageName": "Calificado", "notes": [{"externalKey": "resumen-ia", "body": "..."}]}` — repetir el mismo `externalKey` **edita** la nota en lugar de duplicarla.
+- **Crear/actualizar lead + notas**: `POST http://tu-servidor:8001/api/v1/hooks/n8n/leads` con `{"conversationId": "...", "externalKey": "...", "stageName": "Calificado", "notes": [{"externalKey": "resumen-ia", "body": "..."}]}` — repetir el mismo `externalKey` **edita** la nota en lugar de duplicarla.
 
 Contratos completos en [roadmap/archive/next_steps_webhooks_n8n.md](roadmap/archive/next_steps_webhooks_n8n.md) y en el OpenAPI (`/api/docs`, visible con `APP_ENV=development`).
 
 ## Referencia de la API
 
-Base: `http://host:8001/api/v1` (o `http://host:8000/api/...` vía el proxy del front). Tres formas de autenticación según el grupo:
+⚠ **Todas las rutas llevan el prefijo `/api/v1`** — ej.: `http://host:8001/api/v1/hooks/n8n/messages` (también accesibles por el proxy del front en el puerto 8000). Tres formas de autenticación según el grupo:
 
 | Grupo | Autenticación |
 |---|---|
-| `/auth/**`, `/conversations/**`, `/leads/**`, `/pipelines/**`, `/notes/**` | Cookie de sesión (`POST /auth/login`) |
-| `/config/**` (panel técnico) | Cookie + step-up vigente (`POST /auth/config-panel`) |
-| `/hooks/n8n/**` | Header `Authorization: Bearer <api_key>` |
-| `/whatsapp/webhook` | Firma `X-Hub-Signature-256` de Meta (App Secret) |
+| `/api/v1/auth/**`, `/api/v1/conversations/**`, `/api/v1/leads/**`, `/api/v1/pipelines/**`, `/api/v1/notes/**` | Cookie de sesión (`POST /api/v1/auth/login`) |
+| `/api/v1/config/**` (panel técnico) | Cookie + step-up vigente (`POST /api/v1/auth/config-panel`) |
+| `/api/v1/hooks/n8n/**` | Header `Authorization: Bearer <api_key>` |
+| `/api/v1/whatsapp/webhook` | Firma `X-Hub-Signature-256` de Meta (App Secret) |
 
 Los campos aceptan `camelCase` (y también `snake_case`). Campos desconocidos → `422`. Errores siempre con el formato:
 
@@ -129,23 +129,23 @@ Con `APP_ENV=development` está el OpenAPI interactivo en `/api/docs`.
 ### Autenticación
 
 ```jsonc
-POST /auth/login          { "email": "a@b.com", "password": "…" }        // → set-cookie crm_session
-POST /auth/logout         // sin body
-GET  /auth/me             // → { id, email, name, role, permissions[], configPanelUntil }
-POST /auth/config-panel   { "password": "…" }                            // ADMIN_PANEL_PASSWORD del .env → 15 min
-POST /auth/password       { "currentPassword": "…", "newPassword": "mín 10 chars" }
+POST /api/v1/auth/login          { "email": "a@b.com", "password": "…" }   // → set-cookie crm_session
+POST /api/v1/auth/logout         // sin body
+GET  /api/v1/auth/me             // → { id, email, name, role, permissions[], configPanelUntil }
+POST /api/v1/auth/config-panel   { "password": "…" }                       // ADMIN_PANEL_PASSWORD del .env → 15 min
+POST /api/v1/auth/password       { "currentPassword": "…", "newPassword": "mín 10 chars" }
 ```
 
 ### Conversaciones y mensajes (CRM)
 
 ```jsonc
-GET  /conversations?accountId=&status=open|pending|closed&assignedUserId=&unread=true&q=&before=<ISO>&limit=50
-GET  /conversations/{id}
-GET  /conversations/{id}/messages?before=<ISO>&limit=50
-POST /conversations/{id}/read     // sin body: marca leída
-PATCH /conversations/{id}         { "status": "closed" }                 // o { "assignedUserId": "<uuid>" } o { "unassign": true }
+GET  /api/v1/conversations?accountId=&status=open|pending|closed&assignedUserId=&unread=true&q=&before=<ISO>&limit=50
+GET  /api/v1/conversations/{id}
+GET  /api/v1/conversations/{id}/messages?before=<ISO>&limit=50
+POST /api/v1/conversations/{id}/read    // sin body: marca leída
+PATCH /api/v1/conversations/{id}        { "status": "closed" }           // o { "assignedUserId": "<uuid>" } o { "unassign": true }
 
-POST /conversations/{id}/messages   // → 202 { "messageId", "status": "queued" }
+POST /api/v1/conversations/{id}/messages   // → 202 { "messageId", "status": "queued" }
 // El "message content" (mismo formato acá y en el hook de n8n):
 { "type": "text", "body": "Hola!" }
 { "type": "image", "mediaUrl": "https://…/foto.jpg", "body": "caption opcional" }
@@ -159,38 +159,38 @@ POST /conversations/{id}/messages   // → 202 { "messageId", "status": "queued"
 ### Notas internas
 
 ```jsonc
-GET    /conversations/{id}/notes
-POST   /conversations/{id}/notes  { "body": "texto de la nota" }
-PATCH  /notes/{id}                { "body": "texto editado" }            // propia, o notes:edit:any
-DELETE /notes/{id}                // borrado lógico
-GET    /attachments/{id}/download // binario del adjunto
-GET    /users                     // usuarios activos (para selects de asignación)
+GET    /api/v1/conversations/{id}/notes
+POST   /api/v1/conversations/{id}/notes  { "body": "texto de la nota" }
+PATCH  /api/v1/notes/{id}                { "body": "texto editado" }     // propia, o notes:edit:any
+DELETE /api/v1/notes/{id}                // borrado lógico
+GET    /api/v1/attachments/{id}/download // binario del adjunto
+GET    /api/v1/users                     // usuarios activos (para selects de asignación)
 ```
 
 ### Leads y embudo
 
 ```jsonc
-GET    /pipelines                 // pipelines con etapas ordenadas + conteo y valor por etapa
-POST   /pipelines                 { "name": "Ventas B2B", "isDefault": false }
-POST   /pipelines/{id}/stages     { "name": "Demo", "color": "#22c55e", "position": 3,
-                                    "isTerminal": false, "outcome": null }   // outcome: "won" | "lost"
-PATCH  /stages/{id}               // mismo shape (reordena con position)
-DELETE /stages/{id}?moveLeadsToStageId=<uuid>   // requerido si la etapa tiene leads
+GET    /api/v1/pipelines                 // pipelines con etapas ordenadas + conteo y valor por etapa
+POST   /api/v1/pipelines                 { "name": "Ventas B2B", "isDefault": false }
+POST   /api/v1/pipelines/{id}/stages     { "name": "Demo", "color": "#22c55e", "position": 3,
+                                           "isTerminal": false, "outcome": null }   // outcome: "won" | "lost"
+PATCH  /api/v1/stages/{id}               // mismo shape (reordena con position)
+DELETE /api/v1/stages/{id}?moveLeadsToStageId=<uuid>   // requerido si la etapa tiene leads
 
-GET    /leads?pipelineId=&stageId=&q=&limit=100
-POST   /leads                     { "conversationId": "<uuid>", "title": "opcional",
-                                    "value": 150000, "currency": "ARS", "stageId": "opcional" }
-GET    /leads/{id}                // + history[] (movimientos) + notes[]
-PATCH  /leads/{id}                { "title": "…", "value": 200000, "currency": "ARS", "ownerUserId": "<uuid>" }
-PATCH  /leads/{id}/stage          { "stageId": "<uuid>" }
-DELETE /leads/{id}
+GET    /api/v1/leads?pipelineId=&stageId=&q=&limit=100
+POST   /api/v1/leads                     { "conversationId": "<uuid>", "title": "opcional",
+                                           "value": 150000, "currency": "ARS", "stageId": "opcional" }
+GET    /api/v1/leads/{id}                // + history[] (movimientos) + notes[]
+PATCH  /api/v1/leads/{id}                { "title": "…", "value": 200000, "currency": "ARS", "ownerUserId": "<uuid>" }
+PATCH  /api/v1/leads/{id}/stage          { "stageId": "<uuid>" }
+DELETE /api/v1/leads/{id}
 ```
 
 ### Hooks para n8n (`Authorization: Bearer ck_live_…`)
 
 ```jsonc
 // 1) Responder a WhatsApp — scope hooks:messages → 202 { "messageId", "status" }
-POST /hooks/n8n/messages
+POST /api/v1/hooks/n8n/messages
 {
   "conversationId": "<uuid>",            // opción A: viene en el webhook saliente
   // "accountId": "<uuid>", "to": "5491122334455",   // opción B: abre conversación
@@ -198,7 +198,7 @@ POST /hooks/n8n/messages
 }
 
 // 2) Crear/actualizar lead + notas — scope hooks:leads → 200/201
-POST /hooks/n8n/leads
+POST /api/v1/hooks/n8n/leads
 {
   "conversationId": "<uuid>",            // requerido
   "externalKey": "wf-ventas-123",        // idempotencia: mismo key → mismo lead (upsert)
@@ -233,44 +233,44 @@ POST /hooks/n8n/leads
 }
 ```
 
-### Panel técnico (`/config/**` — cookie + step-up)
+### Panel técnico (`/api/v1/config/**` — cookie + step-up)
 
 ```jsonc
-GET  /config/platform             // → { verifyToken, appSecretSet, graphApiVersion, n8nWebhookUrl, n8nWebhookSecretSet }
-PUT  /config/platform             { "verifyToken": "…", "appSecret": "…", "graphApiVersion": "v21.0",
+GET  /api/v1/config/platform      // → { verifyToken, appSecretSet, graphApiVersion, n8nWebhookUrl, n8nWebhookSecretSet }
+PUT  /api/v1/config/platform      { "verifyToken": "…", "appSecret": "…", "graphApiVersion": "v21.0",
                                     "n8nWebhookUrl": "https://…", "n8nWebhookSecret": "…" }   // todos opcionales; "" quita
-POST /config/platform/generate-verify-token
+POST /api/v1/config/platform/generate-verify-token
 
-GET   /config/accounts
-POST  /config/accounts            { "name": "Ventas AR", "wabaId": "…", "phoneNumberId": "…",
+GET   /api/v1/config/accounts
+POST  /api/v1/config/accounts     { "name": "Ventas AR", "wabaId": "…", "phoneNumberId": "…",
                                     "displayPhoneNumber": "+54 9 11 …", "accessToken": "EAAG…",   // write-only
                                     "n8nInboundWebhookUrl": "opcional", "n8nWebhookSecret": "opcional" }
-PATCH /config/accounts/{id}       // cualquier subset + { "status": "active|paused" } |
-                                  // { "accessToken": "nuevo" } | { "clearWebhookUrl": true }
-POST  /config/accounts/{id}/test          // prueba el token contra la Graph API
-POST  /config/accounts/{id}/test-webhook  // evento sintético al webhook n8n
+PATCH /api/v1/config/accounts/{id}        // cualquier subset + { "status": "active|paused" } |
+                                          // { "accessToken": "nuevo" } | { "clearWebhookUrl": true }
+POST  /api/v1/config/accounts/{id}/test          // prueba el token contra la Graph API
+POST  /api/v1/config/accounts/{id}/test-webhook  // evento sintético al webhook n8n
 
-GET  /config/api-keys
-POST /config/api-keys             { "name": "n8n-prod", "scopes": ["hooks:messages","hooks:leads"] }
+GET  /api/v1/config/api-keys
+POST /api/v1/config/api-keys      { "name": "n8n-prod", "scopes": ["hooks:messages","hooks:leads"] }
                                   // → { id, apiKey: "ck_live_…" }  ⚠ se muestra UNA sola vez
-POST /config/api-keys/{id}/revoke
+POST /api/v1/config/api-keys/{id}/revoke
 
-GET   /config/users
-POST  /config/users               { "email": "…", "name": "…", "role": "agent|supervisor|admin", "password": "mín 10" }
-PATCH /config/users/{id}          { "name": "…", "role": "…", "isActive": false, "password": "reset opcional" }
+GET   /api/v1/config/users
+POST  /api/v1/config/users        { "email": "…", "name": "…", "role": "agent|supervisor|admin", "password": "mín 10" }
+PATCH /api/v1/config/users/{id}   { "name": "…", "role": "…", "isActive": false, "password": "reset opcional" }
 
-GET  /config/event-logs?action=&entityType=&before=&limit=100        // auditoría
-GET  /config/webhook-deliveries?accountId=&onlyFailed=true&limit=100 // entregas a n8n
-POST /config/webhook-deliveries/{id}/redeliver
-GET  /config/failed-messages
-POST /config/messages/{id}/requeue
+GET  /api/v1/config/event-logs?action=&entityType=&before=&limit=100        // auditoría
+GET  /api/v1/config/webhook-deliveries?accountId=&onlyFailed=true&limit=100 // entregas a n8n
+POST /api/v1/config/webhook-deliveries/{id}/redeliver
+GET  /api/v1/config/failed-messages
+POST /api/v1/config/messages/{id}/requeue
 ```
 
 ### Webhook de Meta (lo llama Meta, no vos)
 
 ```
-GET  /whatsapp/webhook   → handshake de verificación (hub.challenge, verify token del panel)
-POST /whatsapp/webhook   → eventos de WhatsApp; exige firma X-Hub-Signature-256 válida
+GET  /api/v1/whatsapp/webhook   → handshake de verificación (hub.challenge, verify token del panel)
+POST /api/v1/whatsapp/webhook   → eventos de WhatsApp; exige firma X-Hub-Signature-256 válida
 ```
 
 ## Operación
