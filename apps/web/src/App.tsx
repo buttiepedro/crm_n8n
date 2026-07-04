@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth";
 import Config from "./pages/Config";
@@ -30,30 +31,64 @@ const LogoutIcon = () => (
     <line x1="21" y1="12" x2="9" y2="12" />
   </svg>
 );
+const CollapseIcon = ({ collapsed }: { collapsed: boolean }) => (
+  <svg {...ICON} aria-hidden>
+    {collapsed ? (
+      <>
+        <polyline points="13 17 18 12 13 7" />
+        <polyline points="6 17 11 12 6 7" />
+      </>
+    ) : (
+      <>
+        <polyline points="11 17 6 12 11 7" />
+        <polyline points="18 17 13 12 18 7" />
+      </>
+    )}
+  </svg>
+);
 
 export default function App() {
   const { me, loading, logout, can } = useAuth();
+  const [collapsed, setCollapsed] = useState(
+    () => localStorage.getItem("sidebar-collapsed") === "1",
+  );
+
+  const toggle = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    localStorage.setItem("sidebar-collapsed", next ? "1" : "0");
+  };
 
   if (loading) return <div className="login-wrap">Cargando…</div>;
   if (!me) return <Login />;
 
   return (
     <div className="layout">
-      <nav className="sidebar">
-        <div className="brand">
-          CRM <em>WhatsApp</em>
+      <nav className={`sidebar ${collapsed ? "collapsed" : ""}`}>
+        <div className="sidebar-top">
+          <div className="brand">
+            CRM <em>WhatsApp</em>
+          </div>
+          <button
+            className="collapse-btn"
+            onClick={toggle}
+            title={collapsed ? "Expandir menú" : "Ocultar menú"}
+            aria-label={collapsed ? "Expandir menú" : "Ocultar menú"}
+          >
+            <CollapseIcon collapsed={collapsed} />
+          </button>
         </div>
-        <NavLink to="/" end>
-          <ChatIcon /> Conversaciones
+        <NavLink to="/" end title="Conversaciones">
+          <ChatIcon /> <span className="label">Conversaciones</span>
         </NavLink>
         {can("leads:read") && (
-          <NavLink to="/leads">
-            <FunnelIcon /> Leads
+          <NavLink to="/leads" title="Leads">
+            <FunnelIcon /> <span className="label">Leads</span>
           </NavLink>
         )}
         {can("config:access") && (
-          <NavLink to="/config">
-            <GearIcon /> Panel técnico
+          <NavLink to="/config" title="Panel técnico">
+            <GearIcon /> <span className="label">Panel técnico</span>
           </NavLink>
         )}
         <div className="spacer" />
@@ -64,12 +99,13 @@ export default function App() {
         </div>
         <a
           href="#"
+          title="Salir"
           onClick={(e) => {
             e.preventDefault();
             logout();
           }}
         >
-          <LogoutIcon /> Salir
+          <LogoutIcon /> <span className="label">Salir</span>
         </a>
       </nav>
       <main className="content">
