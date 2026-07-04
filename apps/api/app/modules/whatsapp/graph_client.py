@@ -74,6 +74,17 @@ class WhatsAppGraphClient:
         resp = await self._request("GET", f"{self._base}/{self._phone_number_id}")
         return resp.json()
 
+    async def get_subscribed_apps(self, waba_id: str) -> dict:
+        """Apps suscriptas a la WABA. Si está vacío, Meta NO envía webhooks
+        de esta WABA aunque el webhook de la app esté verificado."""
+        resp = await self._request("GET", f"{self._base}/{waba_id}/subscribed_apps")
+        return resp.json()
+
+    async def subscribe_app(self, waba_id: str) -> dict:
+        """Suscribe la app (dueña del token) a los webhooks de la WABA."""
+        resp = await self._request("POST", f"{self._base}/{waba_id}/subscribed_apps")
+        return resp.json()
+
 
 def _safe_json(resp: httpx.Response) -> Any:
     try:

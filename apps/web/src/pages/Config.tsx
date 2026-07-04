@@ -371,6 +371,12 @@ function AccountsTab() {
                     window.alert(r.ok ? `Conexión OK: ${r.phone ?? ""}` : `Error: ${JSON.stringify(r.detail)}`);
                   })}>Probar</button>
                   <button onClick={act(async () => {
+                    const r = await api.post<any>(`/config/accounts/${a.id}/subscribe`);
+                    window.alert(r.ok
+                      ? `WABA suscripta ✅ — apps: ${JSON.stringify(r.subscribedApps)}`
+                      : `Error ${r.status}: ${JSON.stringify(r.detail)}`);
+                  })}>Suscribir WABA</button>
+                  <button onClick={act(async () => {
                     await api.post(`/config/accounts/${a.id}/test-webhook`);
                     window.alert("Evento de prueba encolado hacia n8n (ver Logs → Entregas)");
                   })}>Test n8n</button>

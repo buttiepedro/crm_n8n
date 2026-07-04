@@ -269,6 +269,37 @@ async def test_account(
         return {"ok": False, "status": exc.status, "detail": exc.detail}
 
 
+@router.post("/accounts/{account_id}/subscribe")
+async def subscribe_account_waba(
+    account_id: uuid.UUID,
+    auth: AuthContext = Depends(get_config_auth),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Suscribe la app a la WABA de la cuenta (requisito de Meta para que
+    lleguen los webhooks; configurar el webhook de la app NO alcanza)."""
+    from app.modules.settings.service import get_setting_cached
+
+    settings = get_settings()
+    account = await db.get(WhatsAppAccount, account_id)
+    if account is None:
+        raise NotFoundError("Cuenta inexistente")
+    client = WhatsAppGraphClient(
+        access_token=decrypt_access_token(settings, account),
+        phone_number_id=account.phone_number_id,
+        api_version=await get_setting_cached(KEY_GRAPH_VERSION, "v21.0"),
+    )
+    try:
+        result = await client.subscribe_app(account.waba_id)
+        subs = await client.get_subscribed_apps(account.waba_id)
+        await log_event(db, actor_type="user", actor_id=auth.user.id,
+                        action="account.waba_subscribed", entity_type="whatsapp_account",
+                        entity_id=account.id, metadata={"wabaId": account.waba_id})
+        await db.commit()
+        return {"ok": True, "result": result, "subscribedApps": subs.get("data", [])}
+    except GraphApiError as exc:
+        return {"ok": False, "status": exc.status, "detail": exc.detail}
+
+
 @router.post("/accounts/{account_id}/test-webhook")
 async def test_account_webhook(
     account_id: uuid.UUID,
