@@ -1,0 +1,28 @@
+# Entornos y secretos — NUNCA commitear
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+
+# Node (apps/web, fase 3)
+node_modules/
+apps/web/dist/
+
+# Storage local de adjuntos (driver dev)
+storage/
+.test-storage/
+
+# IDE / SO
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
