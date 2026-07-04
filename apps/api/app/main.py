@@ -14,8 +14,12 @@ from app.core.logging import configure_logging
 from app.db.session import dispose_engine, init_engine
 from app.infra.queue import get_queue, init_queue
 from app.infra.storage import init_storage
+from app.modules.auth.router import router as auth_router
+from app.modules.config.router import router as config_router
+from app.modules.conversations.router import router as conversations_router
 from app.modules.health.router import router as health_router
 from app.modules.hooks.router import router as hooks_router
+from app.modules.leads.router import router as leads_router
 from app.modules.task_handlers import register_task_handlers
 from app.modules.whatsapp.router import router as whatsapp_router
 
@@ -79,6 +83,10 @@ def create_app() -> FastAPI:
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(whatsapp_router, prefix="/api/v1")
     app.include_router(hooks_router, prefix="/api/v1")
+    app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(conversations_router, prefix="/api/v1")
+    app.include_router(leads_router, prefix="/api/v1")
+    app.include_router(config_router, prefix="/api/v1")
     return app
 
 

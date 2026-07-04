@@ -15,6 +15,7 @@ from app.db.models.enums import AttachmentDownloadStatus
 from app.db.session import get_sessionmaker
 from app.infra.storage import get_storage
 from app.modules.accounts.service import decrypt_access_token, get_account
+from app.modules.settings.service import KEY_GRAPH_VERSION, get_setting_cached
 from app.modules.whatsapp.graph_client import GraphApiError, WhatsAppGraphClient
 
 log = structlog.get_logger()
@@ -35,7 +36,7 @@ async def handle_download_media(payload: dict) -> None:
         client = WhatsAppGraphClient(
             access_token=decrypt_access_token(settings, account),
             phone_number_id=account.phone_number_id,
-            api_version=settings.graph_api_version,
+            api_version=await get_setting_cached(KEY_GRAPH_VERSION, "v21.0"),
         )
 
         try:

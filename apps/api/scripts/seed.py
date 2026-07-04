@@ -1,19 +1,22 @@
-"""Seed de desarrollo (idempotente): pipeline por defecto, cuenta WhatsApp de
-prueba (token cifrado) y API key para n8n — la key se imprime UNA sola vez.
+"""Seed (idempotente): usuario admin inicial, pipeline por defecto, cuenta
+WhatsApp de prueba y API key para n8n — credenciales se imprimen UNA sola vez.
 
 Uso:  uv run python scripts/seed.py   (requiere DB migrada: alembic upgrade head)
 """
 
 import asyncio
 import os
+import secrets
 
 import sqlalchemy as sa
 
 from app.core.config import get_settings
 from app.core.security import generate_api_key
-from app.db.models import ApiKey, Pipeline, PipelineStage, WhatsAppAccount
+from app.db.models import ApiKey, Pipeline, PipelineStage, User, WhatsAppAccount
+from app.db.models.enums import UserRole
 from app.db.session import get_sessionmaker, init_engine
 from app.modules.accounts.service import encrypt_access_token
+from app.modules.auth.passwords import hash_password
 from app.modules.hooks.auth import SCOPE_HOOKS_LEADS, SCOPE_HOOKS_MESSAGES
 
 DEFAULT_STAGES = [
@@ -31,6 +34,21 @@ async def main() -> None:
     init_engine(settings)
 
     async with get_sessionmaker()() as session:
+        # Usuario admin inicial (si no hay ningún usuario)
+        any_user = (await session.execute(sa.select(User.id).limit(1))).scalar_one_or_none()
+        if any_user is None:
+            password = secrets.token_urlsafe(12)
+            session.add(
+                User(email="admin@crm.local", name="Administrador",
+                     password_hash=hash_password(password), role=UserRole.admin)
+            )
+            print("✔ Usuario admin creado. GUARDÁ estas credenciales (no se repiten):")
+            print("    email:    admin@crm.local")
+            print(f"    password: {password}")
+            print("  (cambiá la contraseña desde el panel al entrar)")
+        else:
+            print("• Ya existen usuarios")
+
         # Pipeline por defecto
         pipeline = (
             await session.execute(sa.select(Pipeline).where(Pipeline.is_default.is_(True)))

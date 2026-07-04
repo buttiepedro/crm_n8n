@@ -18,18 +18,30 @@ class Storage(ABC):
     async def save(self, path: str, data: bytes, content_type: str) -> str:
         """Guarda el binario y devuelve el path/URI persistible en DB."""
 
+    @abstractmethod
+    async def load(self, path: str) -> bytes:
+        """Lee el binario guardado (para servirlo al panel)."""
+
 
 class LocalStorage(Storage):
     def __init__(self, base_path: Path) -> None:
         self._base = base_path
         self._base.mkdir(parents=True, exist_ok=True)
 
-    async def save(self, path: str, data: bytes, content_type: str) -> str:
+    def _resolve(self, path: str) -> Path:
         target = (self._base / path).resolve()
         if not str(target).startswith(str(self._base.resolve())):
             raise ValueError("Path fuera del directorio de storage")
+        return target
+
+    async def save(self, path: str, data: bytes, content_type: str) -> str:
+        target = self._resolve(path)
         await asyncio.to_thread(self._write, target, data)
         return path
+
+    async def load(self, path: str) -> bytes:
+        target = self._resolve(path)
+        return await asyncio.to_thread(target.read_bytes)
 
     @staticmethod
     def _write(target: Path, data: bytes) -> None:

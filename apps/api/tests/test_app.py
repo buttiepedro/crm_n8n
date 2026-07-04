@@ -1,17 +1,29 @@
 """Tests de la app FastAPI sin base de datos: health, verificación del
-webhook de Meta y rechazo de firmas inválidas (la firma se valida ANTES de
-tocar la DB)."""
+webhook de Meta y rechazo de firmas inválidas.
+
+El verify token y el app secret viven en DB (settings de plataforma);
+acá se inyectan al cache con prime_cache para no requerir DB."""
 
 import hashlib
 import hmac
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.modules.settings import service as platform
 
-APP_SECRET = "app-secret-test"  # de conftest.py
+APP_SECRET = "app-secret-test"
 VERIFY_TOKEN = "verify-token-test"
+
+
+@pytest.fixture(autouse=True)
+def _prime_platform_settings():
+    platform.prime_cache(platform.KEY_WA_VERIFY_TOKEN, VERIFY_TOKEN)
+    platform.prime_cache(platform.KEY_WA_APP_SECRET, APP_SECRET)
+    yield
+    platform.invalidate_cache()
 
 
 def _signed(body: bytes) -> str:
@@ -89,3 +101,17 @@ def test_hooks_require_api_key_header():
         resp = client.post("/api/v1/hooks/n8n/leads", json={})
         assert resp.status_code == 401
         assert resp.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_crm_requires_session_cookie():
+    """El CRM exige sesión; sin cookie → 401."""
+    with TestClient(app) as client:
+        assert client.get("/api/v1/conversations").status_code == 401
+        assert client.get("/api/v1/auth/me").status_code == 401
+
+
+def test_config_panel_requires_session():
+    """El panel técnico exige sesión (y luego step-up)."""
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/config/accounts")
+        assert resp.status_code == 401

@@ -31,19 +31,34 @@ Los contratos compartidos viven como schemas **Pydantic** en `apps/api/app/schem
 
 ## Documentos del roadmap
 
-| # | Archivo | Feature |
-|---|---|---|
-| 1 | [next_steps_arquitectura.md](next_steps_arquitectura.md) | Arquitectura general, servicios GCP, flujos de datos |
-| 2 | [next_steps_base_de_datos.md](next_steps_base_de_datos.md) | Esquema PostgreSQL completo, índices, migraciones |
-| 3 | [next_steps_integracion_whatsapp.md](next_steps_integracion_whatsapp.md) | Recepción/envío de mensajes, media, multi-cuenta |
-| 4 | [next_steps_webhooks_n8n.md](next_steps_webhooks_n8n.md) | Los 2 webhooks expuestos (respuestas y leads/notas) + webhook saliente hacia n8n |
-| 5 | [next_steps_autenticacion_roles.md](next_steps_autenticacion_roles.md) | Login, roles, permisos, step-up del panel de configuración |
-| 6 | [next_steps_crm_conversaciones.md](next_steps_crm_conversaciones.md) | Panel de conversaciones, filtros, notas internas, tiempo real |
-| 7 | [next_steps_leads_embudo.md](next_steps_leads_embudo.md) | Leads y embudo (pipeline) configurable |
-| 8 | [next_steps_panel_configuracion.md](next_steps_panel_configuracion.md) | Panel admin: logs, credenciales WhatsApp, webhooks n8n, cuentas |
-| 9 | [next_steps_seguridad.md](next_steps_seguridad.md) | Gestión de secretos, cifrado, HMAC, hardening |
-| 10 | [next_steps_observabilidad_logs.md](next_steps_observabilidad_logs.md) | Logging estructurado, manejo de errores, métricas, alertas |
-| 11 | [next_steps_despliegue_gcp.md](next_steps_despliegue_gcp.md) | Infraestructura, CI/CD, entornos, escalabilidad |
+**Terminados** (implementados; movidos a [archive/](archive/)):
+
+| Archivo | Feature |
+|---|---|
+| [archive/next_steps_arquitectura.md](archive/next_steps_arquitectura.md) | Arquitectura general, flujos de datos |
+| [archive/next_steps_base_de_datos.md](archive/next_steps_base_de_datos.md) | Esquema PostgreSQL (18 tablas, migración inicial) |
+| [archive/next_steps_integracion_whatsapp.md](archive/next_steps_integracion_whatsapp.md) | Webhook Meta, media, envío, multi-cuenta |
+| [archive/next_steps_webhooks_n8n.md](archive/next_steps_webhooks_n8n.md) | Los 2 hooks entrantes + webhook saliente firmado |
+| [archive/next_steps_autenticacion_roles.md](archive/next_steps_autenticacion_roles.md) | Login argon2id, roles/permisos, step-up del panel |
+| [archive/next_steps_crm_conversaciones.md](archive/next_steps_crm_conversaciones.md) | Inbox, envío desde el CRM, notas internas |
+| [archive/next_steps_leads_embudo.md](archive/next_steps_leads_embudo.md) | Leads + embudo configurable (kanban) |
+| [archive/next_steps_panel_configuracion.md](archive/next_steps_panel_configuracion.md) | Panel técnico: cuentas, tokens, API keys, logs |
+
+**Pendientes**:
+
+| Archivo | Feature |
+|---|---|
+| [next_steps_seguridad.md](next_steps_seguridad.md) | gitleaks/pip-audit en CI, checklist ASVS, SSRF en mediaUrl |
+| [next_steps_observabilidad_logs.md](next_steps_observabilidad_logs.md) | Métricas, alertas, dashboards (los logs/auditoría ya están) |
+| [next_steps_despliegue_gcp.md](next_steps_despliegue_gcp.md) | Cloud Run + Cloud Tasks + GCS (drivers P5), CI/CD |
+
+**Pendientes residuales de los docs archivados** (mejoras, no bloqueantes): WebSockets en lugar de polling, sincronización de plantillas aprobadas de Meta, envío de plantillas desde la UI, invitaciones por link para usuarios, búsqueda full-text en mensajes, métricas de conversión del embudo, idempotencia por `Idempotency-Key` en hooks.
+
+> **Nota de implementación (2026-07)**: el `.env` quedó reducido a lo operativo
+> (contraseña del panel técnico, clave de cifrado, DB, puertos, drivers).
+> Verify token, App Secret, tokens de cuentas y webhooks n8n viven cifrados en
+> la DB y se gestionan desde el panel técnico. Únicos puertos expuestos:
+> 8000 (front) y 8001 (API para n8n/Meta).
 
 ## Orden de desarrollo recomendado (fases)
 

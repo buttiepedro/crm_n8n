@@ -1,13 +1,14 @@
-# Stack de desarrollo — configuración en UN solo archivo: ./.env (raíz)
+# Stack — configuración en UN solo archivo: ./.env (raíz)
 #   cp .env.example .env   →   docker compose up -d --build
 #
-#   → db       PostgreSQL 16 (healthcheck; credenciales del .env)
+#   → db       PostgreSQL 16 (SOLO red interna, sin puerto expuesto)
 #   → migrate  alembic upgrade head + seed (corre una vez, al terminar arranca api)
-#   → api      FastAPI en la red interna (expuesto en ${API_PORT} para túneles/Meta)
-#   → web      SPA React + nginx con proxy /api → api:8080  →  http://localhost:${WEB_PORT}
+#   → api      FastAPI → expuesta en :8001 (webhooks de Meta y hooks de n8n)
+#   → web      SPA React + nginx (proxy /api → api)  →  http://host:8000
 #
-# n8n es EXTERNO a este stack: la URL del webhook hacia n8n se configura por
-# cuenta (seed: N8N_WEBHOOK_BASE del .env; luego, panel de configuración).
+# Únicos puertos expuestos: 8000 (front) y 8001 (api para n8n/Meta).
+# n8n es EXTERNO. Tokens de WhatsApp, app secret, webhooks, cuentas y usuarios
+# se configuran desde el PANEL TÉCNICO (no desde el .env).
 
 services:
   db:
@@ -17,8 +18,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-crm}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm}
       POSTGRES_DB: ${POSTGRES_DB:-crm}
-    ports:
-      - "${DB_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -43,7 +42,7 @@ services:
     build: ./apps/api
     container_name: crm_n8n_api
     ports:
-      - "${API_PORT:-8080}:8080"   # túnel de webhooks de Meta / debugging directo
+      - "${API_PORT:-8001}:8080"   # API para n8n y webhooks de Meta
     env_file:
       - ./.env
     environment:

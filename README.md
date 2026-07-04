@@ -11,29 +11,37 @@ Plataforma en Google Cloud que actúa como intermediario entre la **WhatsApp Bus
 Requisitos: Docker Desktop.
 
 ```bash
-# 1. Configurar entorno — UN solo .env en la raíz (solo la primera vez)
+# 1. Configurar entorno — UN solo .env en la raíz, SOLO valores operativos
 cp .env.example .env
-# completar los valores (cada variable tiene instrucciones en el archivo);
-# la clave de cifrado se genera con:
-#   python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"
+# completar ADMIN_PANEL_PASSWORD y CREDENTIALS_ENCRYPTION_KEY:
+#   openssl rand -base64 18   →  ADMIN_PANEL_PASSWORD
+#   openssl rand -base64 32   →  CREDENTIALS_ENCRYPTION_KEY
 
 # 2. Levantar todo: DB → migraciones + seed (automático) → API → frontend
 docker compose up -d --build
 
-# La API key para n8n la imprime el seed (una sola vez):
+# Credenciales iniciales (admin y API key de n8n) las imprime el seed UNA vez:
 docker compose logs migrate
 ```
 
-> **n8n es externo al stack**: la URL del webhook hacia tu n8n se define en
-> `N8N_WEBHOOK_BASE` del `.env` (y por cuenta, desde el panel en P4).
+**Únicos puertos expuestos**: `8000` (frontend) y `8001` (API para n8n y el webhook de Meta). PostgreSQL queda solo en la red interna de Docker.
 
-- **Frontend**: http://localhost:8000 (nginx proxea `/api` al backend por la red interna)
-- **API directa**: http://localhost:8080 · docs OpenAPI en http://localhost:8080/api/docs
+- **Frontend / CRM**: http://localhost:8000 — login con el admin del seed (`admin@crm.local`)
+- **API para n8n**: http://localhost:8001 — hooks `POST /api/v1/hooks/n8n/messages` y `/leads` (`Authorization: Bearer <api_key>`)
+- Webhook de Meta: `GET|POST /api/v1/whatsapp/webhook` (túnel HTTPS hacia el **8001**)
 - Health: `GET /api/v1/health` · Readiness: `GET /api/v1/health/ready`
-- Webhook de Meta: `GET|POST /api/v1/whatsapp/webhook` (usar túnel `cloudflared`/`ngrok` hacia el 8080)
-- Hooks para n8n: `POST /api/v1/hooks/n8n/messages` · `POST /api/v1/hooks/n8n/leads` (auth: `Authorization: Bearer <api_key>`)
+
+**Todo lo demás se configura desde el panel técnico** (⚙️ en el frontend, protegido por `ADMIN_PANEL_PASSWORD`): verify token y App Secret de Meta, cuentas de WhatsApp con sus tokens (cifrados en DB), webhooks hacia n8n por cuenta, API keys, usuarios/roles y visores de logs. **Nada de eso va en el `.env`.**
 
 Las migraciones corren solas en el servicio `migrate` (`alembic upgrade head` + seed idempotente); la API arranca recién cuando terminan bien.
+
+### Puesta en marcha (una vez arriba)
+
+1. Entrar a http://host:8000 con `admin@crm.local` (contraseña en `docker compose logs migrate`) y cambiarla.
+2. ⚙️ Panel técnico → pestaña **WhatsApp / Meta**: generar el verify token y cargar el App Secret de tu app de Meta.
+3. Pestaña **Cuentas**: crear la cuenta con su Phone Number ID + token permanente + URL del webhook de tu n8n. Botones "Probar" y "Test n8n" verifican ambos lados.
+4. En Meta for Developers: webhook → `https://<tu-https>/api/v1/whatsapp/webhook` con el verify token del paso 2, suscripto a `messages`.
+5. Pestaña **API Keys**: crear la key para n8n (se muestra una sola vez).
 
 ## Desarrollo sin Docker (backend local)
 
@@ -64,4 +72,4 @@ uv run python scripts/generate_ddl.py    # emite el DDL PostgreSQL desde los mod
 
 ## Estado del desarrollo
 
-Ver fases y prioridades en [roadmap/README.md](roadmap/README.md). Implementado hasta ahora: fundaciones (P0), núcleo de mensajería WhatsApp (P1) y puente n8n (P2). Pendiente: autenticación/CRM UI (P3), panel de configuración (P4), despliegue GCP (P5).
+Implementado: fundaciones (P0), mensajería WhatsApp (P1), puente n8n (P2), autenticación con roles + CRM completo (P3) y panel técnico (P4). Los documentos de diseño de las fases terminadas están en [roadmap/archive/](roadmap/archive/); lo pendiente (observabilidad avanzada, hardening CI, despliegue GCP) sigue en [roadmap/](roadmap/README.md).

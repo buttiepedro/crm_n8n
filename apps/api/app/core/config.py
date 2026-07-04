@@ -1,7 +1,9 @@
 """Configuración de la aplicación validada al arranque (fail-fast).
 
-Todas las variables se leen del entorno (o .env en desarrollo). Si falta
-alguna requerida o tiene formato inválido, el proceso no inicia.
+Filosofía: en el .env viven SOLO la contraseña del panel técnico y valores
+operativos (DB, puertos, drivers, clave de cifrado). Todo lo demás —tokens
+de WhatsApp, app secret, webhooks de n8n, cuentas— se configura desde el
+panel técnico y se guarda (cifrado) en la base de datos.
 """
 
 import base64
@@ -33,19 +35,25 @@ class Settings(BaseSettings):
 
     database_url: str
 
-    session_secret: SecretStr
+    # Contraseña EXPLÍCITA del panel técnico (requisito del proyecto)
     admin_panel_password: SecretStr
-    credentials_encryption_key: SecretStr  # base64 de 32 bytes (AES-256)
+    # Clave maestra AES-256-GCM para credenciales en DB (base64, 32 bytes)
+    credentials_encryption_key: SecretStr
 
-    whatsapp_verify_token: SecretStr
-    whatsapp_app_secret: SecretStr
-    graph_api_version: str = "v21.0"
+    # Sesiones
+    session_ttl_hours: int = 12
+    config_panel_ttl_minutes: int = 15
+    cookie_secure: bool = False  # true detrás de HTTPS
 
+    # Infraestructura
     queue_driver: Literal["inline", "cloud_tasks"] = "inline"
     storage_driver: Literal["local", "gcs"] = "local"
     storage_local_path: Path = Path("./storage")
     gcs_bucket_attachments: str | None = None
     gcp_project_id: str | None = None
+
+    # Solo para el seed de desarrollo (la URL real es por cuenta, en DB)
+    n8n_webhook_base: str | None = None
 
     @field_validator("database_url")
     @classmethod

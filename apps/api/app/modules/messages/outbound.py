@@ -29,6 +29,7 @@ from app.db.session import get_sessionmaker
 from app.infra.queue import TASK_SEND_MESSAGE, get_queue
 from app.modules.accounts.service import decrypt_access_token
 from app.modules.conversations.service import get_or_create_contact, get_or_create_conversation
+from app.modules.settings.service import KEY_GRAPH_VERSION, get_setting_cached
 from app.modules.whatsapp.graph_client import GraphApiError, WhatsAppGraphClient
 from app.schemas.hooks import OutboundMessageContent
 
@@ -121,7 +122,7 @@ async def handle_send_message(payload: dict) -> None:
         client = WhatsAppGraphClient(
             access_token=decrypt_access_token(settings, account),
             phone_number_id=account.phone_number_id,
-            api_version=settings.graph_api_version,
+            api_version=await get_setting_cached(KEY_GRAPH_VERSION, "v21.0"),
         )
         graph_payload = build_graph_payload(message, contact.wa_id)
 
