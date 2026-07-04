@@ -211,26 +211,34 @@ export default function Inbox() {
           </label>
         </div>
         <div className="pane-body">
-          {convs.map((c) => (
-            <div
-              key={c.id}
-              className={`conv-item ${selectedId === c.id ? "selected" : ""}`}
-              onClick={() => open(c)}
-            >
-              <div className="top">
-                <span className="name">{c.contact.profileName || c.contact.waId}</span>
-                {c.unreadCount > 0 && <span className="badge">{c.unreadCount}</span>}
+          {convs.map((c) => {
+            const display = c.contact.profileName || c.contact.waId;
+            return (
+              <div
+                key={c.id}
+                className={`conv-item ${selectedId === c.id ? "selected" : ""}`}
+                onClick={() => open(c)}
+              >
+                <div className="conv-avatar" aria-hidden>
+                  {display.charAt(0).toUpperCase()}
+                </div>
+                <div className="conv-main">
+                  <div className="top">
+                    <span className="name">{display}</span>
+                    {c.unreadCount > 0 && <span className="badge">{c.unreadCount}</span>}
+                  </div>
+                  <div className="preview">{c.lastMessagePreview || "—"}</div>
+                  <div className="row" style={{ marginTop: 5, gap: 4 }}>
+                    <span className="pill">{c.account.name}</span>
+                    <span className={`pill ${c.windowOpen ? "green" : "red"}`}>
+                      {c.windowOpen ? "24h abierta" : "24h cerrada"}
+                    </span>
+                    {c.leadId && <span className="pill yellow">lead</span>}
+                  </div>
+                </div>
               </div>
-              <div className="preview">{c.lastMessagePreview || "—"}</div>
-              <div className="row" style={{ marginTop: 4, gap: 4 }}>
-                <span className="pill">{c.account.name}</span>
-                <span className={`pill ${c.windowOpen ? "green" : "red"}`}>
-                  {c.windowOpen ? "24h abierta" : "24h cerrada"}
-                </span>
-                {c.leadId && <span className="pill yellow">lead</span>}
-              </div>
-            </div>
-          ))}
+            );
+          })}
           {convs.length === 0 && <p className="muted" style={{ padding: 16 }}>Sin conversaciones.</p>}
         </div>
       </div>
@@ -243,7 +251,7 @@ export default function Inbox() {
           </div>
         ) : (
           <>
-            <div className="pane-head" style={{ background: "#fff" }}>
+            <div className="pane-head">
               <strong>{selected.contact.profileName || selected.contact.waId}</strong>
               <span className="muted">+{selected.contact.waId}</span>
               <span className="pill">{selected.status}</span>

@@ -43,9 +43,14 @@ function SecretBox({
   return (
     <div
       className="card"
-      style={{ marginBottom: 16, borderColor: "#f59e0b", background: "#fffbeb" }}
+      style={{
+        marginBottom: 16,
+        borderColor: "var(--note-border)",
+        background: "var(--note-bg)",
+        color: "var(--note-text)",
+      }}
     >
-      <strong>⚠ {label}</strong>
+      <strong>{label}</strong>
       <p className="muted" style={{ margin: "6px 0" }}>
         {hint ?? "Guardalo ahora: no se vuelve a mostrar."}
       </p>
