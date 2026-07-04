@@ -165,10 +165,16 @@ async def handle_dispatch_n8n_event(payload: dict) -> None:
             "X-Event-Id": delivery.payload.get("eventId", str(delivery.id)),
             "X-Event-Type": delivery.event_type,
         }
-        # Firma: secreto de la cuenta si tiene uno propio; si no, el global
-        secret = decrypt_webhook_secret(settings, account) or await get_setting_cached(
-            KEY_N8N_WEBHOOK_SECRET
-        )
+        # Firma: secreto de la cuenta si tiene uno propio; si no, el global.
+        # Secreto ilegible (clave de cifrado cambiada) → entregar sin firma
+        # antes que frenar el flujo de mensajes.
+        try:
+            secret = decrypt_webhook_secret(settings, account) or await get_setting_cached(
+                KEY_N8N_WEBHOOK_SECRET
+            )
+        except Exception:
+            log.warning("n8n_secret_unreadable", account_id=str(account.id))
+            secret = None
         if secret:
             headers["X-Signature-256"] = sign_payload(secret, body)
 

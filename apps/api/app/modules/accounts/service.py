@@ -7,10 +7,12 @@ jamás se loguean ni se devuelven por API.
 import uuid
 
 import sqlalchemy as sa
+from cryptography.exceptions import InvalidTag
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.crypto import CredentialsCipher
+from app.core.errors import ConflictError
 from app.db.models import WhatsAppAccount
 
 # Marcador de cuenta sin token cargado (auto-registrada o recién creada):
@@ -40,7 +42,19 @@ def _cipher(settings: Settings) -> CredentialsCipher:
 
 
 def decrypt_access_token(settings: Settings, account: WhatsAppAccount) -> str:
-    return _cipher(settings).decrypt(account.access_token_ciphertext, aad=str(account.id))
+    if not has_token(account):
+        raise ConflictError(
+            f"La cuenta '{account.name}' no tiene access token: cargalo en el panel → Cuenta",
+            code="ACCOUNT_TOKEN_MISSING",
+        )
+    try:
+        return _cipher(settings).decrypt(account.access_token_ciphertext, aad=str(account.id))
+    except (InvalidTag, ValueError) as exc:
+        raise ConflictError(
+            f"El token de '{account.name}' no se puede descifrar: fue guardado con otra "
+            "CREDENTIALS_ENCRYPTION_KEY. Volvé a pegarlo en el panel → Cuenta",
+            code="CREDENTIALS_UNREADABLE",
+        ) from exc
 
 
 def encrypt_access_token(settings: Settings, account_id: uuid.UUID, token: str) -> bytes:
@@ -50,9 +64,16 @@ def encrypt_access_token(settings: Settings, account_id: uuid.UUID, token: str) 
 def decrypt_webhook_secret(settings: Settings, account: WhatsAppAccount) -> str | None:
     if account.n8n_webhook_secret_ciphertext is None:
         return None
-    return _cipher(settings).decrypt(
-        account.n8n_webhook_secret_ciphertext, aad=f"n8n:{account.id}"
-    )
+    try:
+        return _cipher(settings).decrypt(
+            account.n8n_webhook_secret_ciphertext, aad=f"n8n:{account.id}"
+        )
+    except (InvalidTag, ValueError) as exc:
+        raise ConflictError(
+            f"El secreto de webhook de '{account.name}' no se puede descifrar "
+            "(clave de cifrado cambiada): regeneralo en el panel → Cuenta",
+            code="CREDENTIALS_UNREADABLE",
+        ) from exc
 
 
 def encrypt_webhook_secret(settings: Settings, account_id: uuid.UUID, secret: str) -> bytes:

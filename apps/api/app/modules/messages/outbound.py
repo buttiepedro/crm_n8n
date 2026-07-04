@@ -126,8 +126,19 @@ async def handle_send_message(payload: dict) -> None:
         contact = await session.get(Contact, conversation.contact_id)
         account = await session.get(WhatsAppAccount, message.whatsapp_account_id)
 
+        try:
+            access_token = decrypt_access_token(settings, account)
+        except ConflictError as exc:
+            # Token faltante o cifrado con otra clave: fallo claro, no colgado
+            message.status = MessageStatus.failed
+            message.error_detail = {"code": exc.code, "detail": exc.message}
+            await session.commit()
+            log.error("outbound_failed_credentials", message_id=str(message.id),
+                      code=exc.code)
+            return
+
         client = WhatsAppGraphClient(
-            access_token=decrypt_access_token(settings, account),
+            access_token=access_token,
             phone_number_id=account.phone_number_id,
             api_version=await get_setting_cached(KEY_GRAPH_VERSION, "v21.0"),
         )

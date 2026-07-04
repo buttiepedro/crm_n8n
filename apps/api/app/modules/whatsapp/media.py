@@ -9,7 +9,7 @@ import hashlib
 import structlog
 
 from app.core.config import get_settings
-from app.core.errors import RetryableTaskError
+from app.core.errors import ConflictError, RetryableTaskError
 from app.db.models import Attachment, Message
 from app.db.models.enums import AttachmentDownloadStatus
 from app.db.session import get_sessionmaker
@@ -33,8 +33,17 @@ async def handle_download_media(payload: dict) -> None:
         message = await session.get(Message, attachment.message_id)
         account = await get_account(session, message.whatsapp_account_id)
 
+        try:
+            access_token = decrypt_access_token(settings, account)
+        except ConflictError as exc:
+            attachment.download_status = AttachmentDownloadStatus.failed
+            await session.commit()
+            log.error("media_download_failed_credentials",
+                      attachment_id=str(attachment.id), code=exc.code)
+            return
+
         client = WhatsAppGraphClient(
-            access_token=decrypt_access_token(settings, account),
+            access_token=access_token,
             phone_number_id=account.phone_number_id,
             api_version=await get_setting_cached(KEY_GRAPH_VERSION, "v21.0"),
         )
