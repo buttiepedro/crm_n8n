@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.errors import (
     AccountPausedError,
+    ConflictError,
     NotFoundError,
     RetryableTaskError,
     WindowExpiredError,
@@ -27,7 +28,7 @@ from app.db.models.enums import (
 )
 from app.db.session import get_sessionmaker
 from app.infra.queue import TASK_SEND_MESSAGE, get_queue
-from app.modules.accounts.service import decrypt_access_token
+from app.modules.accounts.service import decrypt_access_token, has_token
 from app.modules.conversations.service import get_or_create_contact, get_or_create_conversation
 from app.modules.settings.service import KEY_GRAPH_VERSION, get_setting_cached
 from app.modules.whatsapp.graph_client import GraphApiError, WhatsAppGraphClient
@@ -61,6 +62,12 @@ async def queue_outbound_message(
 
     if account.status == WaAccountStatus.paused:
         raise AccountPausedError(f"La cuenta '{account.name}' está pausada")
+    if not has_token(account):
+        raise ConflictError(
+            f"La cuenta '{account.name}' no tiene access token cargado: "
+            "pegalo en el panel técnico → Cuentas para poder enviar",
+            code="ACCOUNT_TOKEN_MISSING",
+        )
     if content.type != "template" and not is_window_open(conversation.last_inbound_at):
         raise WindowExpiredError(
             "Ventana de 24h cerrada: solo se pueden enviar plantillas aprobadas"

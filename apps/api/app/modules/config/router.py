@@ -35,6 +35,7 @@ from app.modules.accounts.service import (
     decrypt_access_token,
     encrypt_access_token,
     encrypt_webhook_secret,
+    has_token,
 )
 from app.modules.audit.service import log_event
 from app.modules.auth.deps import AuthContext, get_config_auth
@@ -137,7 +138,7 @@ def _account_row(a: WhatsAppAccount) -> dict:
         "status": a.status.value,
         "n8nInboundWebhookUrl": a.n8n_inbound_webhook_url,
         "hasWebhookSecret": a.n8n_webhook_secret_ciphertext is not None,
-        "tokenSet": bool(a.access_token_ciphertext and a.access_token_ciphertext != b"pendiente"),
+        "tokenSet": has_token(a),
         "settings": a.settings,
         "createdAt": a.created_at.isoformat(),
     }
@@ -267,6 +268,38 @@ async def test_account(
         account.status = WaAccountStatus.error
         await db.commit()
         return {"ok": False, "status": exc.status, "detail": exc.detail}
+
+
+@router.delete("/accounts/{account_id}")
+async def delete_account(
+    account_id: uuid.UUID,
+    auth: AuthContext = Depends(get_config_auth),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Borra una cuenta SOLO si no tiene mensajes ni conversaciones (p.ej. la
+    de prueba del seed). Con historial, pausarla en vez de borrarla."""
+    from app.db.models import Conversation
+
+    account = await db.get(WhatsAppAccount, account_id)
+    if account is None:
+        raise NotFoundError("Cuenta inexistente")
+    msg_count = (await db.execute(
+        sa.select(sa.func.count()).where(Message.whatsapp_account_id == account_id)
+    )).scalar_one()
+    conv_count = (await db.execute(
+        sa.select(sa.func.count()).where(Conversation.whatsapp_account_id == account_id)
+    )).scalar_one()
+    if msg_count or conv_count:
+        raise ConflictError(
+            f"La cuenta tiene historial ({msg_count} mensajes): pausala en vez de borrarla")
+    await db.execute(
+        sa.delete(WebhookDelivery).where(WebhookDelivery.whatsapp_account_id == account_id))
+    await db.delete(account)
+    await log_event(db, actor_type="user", actor_id=auth.user.id, action="account.deleted",
+                    entity_type="whatsapp_account", entity_id=account_id,
+                    metadata={"name": account.name})
+    await db.commit()
+    return {"ok": True}
 
 
 @router.post("/accounts/{account_id}/subscribe")

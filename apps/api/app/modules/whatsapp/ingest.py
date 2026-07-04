@@ -23,9 +23,10 @@ from app.db.models.enums import (
     MessageOrigin,
     MessageStatus,
 )
+from app.db.models import WhatsAppAccount
 from app.db.session import get_sessionmaker
 from app.infra.queue import TASK_DISPATCH_N8N, TASK_DOWNLOAD_MEDIA, get_queue
-from app.modules.accounts.service import get_account_by_phone_number_id
+from app.modules.accounts.service import TOKEN_PENDING, get_account_by_phone_number_id
 from app.modules.conversations.service import get_or_create_contact, get_or_create_conversation
 from app.modules.n8n_dispatch.service import create_message_received_delivery
 from app.modules.whatsapp.parser import (
@@ -54,8 +55,20 @@ async def ingest_meta_event(session: AsyncSession, event: dict) -> None:
 async def _ingest_message(session: AsyncSession, parsed: ParsedInboundMessage) -> None:
     account = await get_account_by_phone_number_id(session, parsed.phone_number_id)
     if account is None:
-        log.warning("meta_event_unknown_account", phone_number_id=parsed.phone_number_id)
-        return
+        # Auto-registro: recibir nunca requiere configuración previa. El mensaje
+        # se guarda y se reenvía a n8n; el token se carga después en el panel
+        # (solo hace falta para RESPONDER y descargar media).
+        account = WhatsAppAccount(
+            name=f"Auto: {parsed.display_phone_number or parsed.phone_number_id}",
+            waba_id="",
+            phone_number_id=parsed.phone_number_id,
+            display_phone_number=parsed.display_phone_number or parsed.phone_number_id,
+            access_token_ciphertext=TOKEN_PENDING,
+        )
+        session.add(account)
+        await session.flush()
+        log.info("account_auto_registered", phone_number_id=parsed.phone_number_id,
+                 account_id=str(account.id))
 
     contact = await get_or_create_contact(session, parsed.wa_from, parsed.profile_name)
     conversation = await get_or_create_conversation(session, account.id, contact.id)
@@ -122,7 +135,8 @@ async def _ingest_message(session: AsyncSession, parsed: ParsedInboundMessage) -
     )
 
     queue = get_queue()
-    if attachment is not None:
+    if attachment is not None and account.access_token_ciphertext != TOKEN_PENDING:
+        # Descargar media requiere el token de la cuenta
         await queue.enqueue(TASK_DOWNLOAD_MEDIA, {"attachment_id": str(attachment.id)})
     if delivery is not None:
         await queue.enqueue(TASK_DISPATCH_N8N, {"delivery_id": str(delivery.id)})

@@ -13,6 +13,14 @@ from app.core.config import Settings
 from app.core.crypto import CredentialsCipher
 from app.db.models import WhatsAppAccount
 
+# Marcador de cuenta sin token cargado (auto-registrada o recién creada):
+# recibe y reenvía a n8n, pero NO puede enviar hasta pegar el token en el panel.
+TOKEN_PENDING = b"pendiente"
+
+
+def has_token(account: WhatsAppAccount) -> bool:
+    return bool(account.access_token_ciphertext) and account.access_token_ciphertext != TOKEN_PENDING
+
 
 async def get_account(session: AsyncSession, account_id: uuid.UUID) -> WhatsAppAccount | None:
     return await session.get(WhatsAppAccount, account_id)

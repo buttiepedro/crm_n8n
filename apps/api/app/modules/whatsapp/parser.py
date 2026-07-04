@@ -33,6 +33,7 @@ class ParsedInboundMessage:
     media: ParsedMedia | None
     reply_to_wamid: str | None
     wa_timestamp: datetime
+    display_phone_number: str | None = None  # metadata del número de negocio
     raw: dict = field(repr=False, default_factory=dict)
 
 
@@ -98,7 +99,9 @@ def parse_meta_event(
     for entry in event.get("entry", []):
         for change in entry.get("changes", []):
             value = change.get("value") or {}
-            phone_number_id = (value.get("metadata") or {}).get("phone_number_id")
+            metadata = value.get("metadata") or {}
+            phone_number_id = metadata.get("phone_number_id")
+            display_phone_number = metadata.get("display_phone_number")
             if not phone_number_id:
                 continue
 
@@ -125,6 +128,7 @@ def parse_meta_event(
                         media=_extract_media(msg, raw_type),
                         reply_to_wamid=(msg.get("context") or {}).get("id"),
                         wa_timestamp=_ts(msg.get("timestamp")),
+                        display_phone_number=display_phone_number,
                         raw=msg,
                     )
                 )

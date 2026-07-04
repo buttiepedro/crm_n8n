@@ -94,7 +94,7 @@ export default function Config() {
       <div className="tabs">
         {[
           ["plataforma", "WhatsApp / Meta"],
-          ["cuentas", "Cuentas"],
+          ["cuentas", "Cuenta"],
           ["keys", "API Keys n8n"],
           ["usuarios", "Usuarios"],
           ["logs", "Logs"],
@@ -292,25 +292,68 @@ function PlatformTab() {
 
 function AccountsTab() {
   const [items, setItems] = useState<any[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [secret, setSecret] = useState<{ label: string; value: string; hint?: string } | null>(null);
-  const [form, setForm] = useState({
-    name: "", wabaId: "", phoneNumberId: "", displayPhoneNumber: "",
-    accessToken: "", n8nInboundWebhookUrl: "",
-  });
 
-  const load = () => api.get<any>("/config/accounts").then((d) => setItems(d.items)).catch(showError);
+  const load = () =>
+    api.get<any>("/config/accounts")
+      .then((d) => { setItems(d.items); setLoaded(true); })
+      .catch(showError);
   useEffect(() => {
     load();
   }, []);
 
-  const create = async () => {
+  return (
+    <>
+      {secret && (
+        <SecretBox label={secret.label} value={secret.value} hint={secret.hint}
+                   onClose={() => setSecret(null)} />
+      )}
+      {loaded && items.length === 0 && (
+        <div className="card">
+          <p className="muted" style={{ margin: 0 }}>
+            Todavía no hay cuenta. Cuando llegue el primer mensaje de WhatsApp se crea sola
+            (auto-registro) y acá solo completás el token para poder responder.
+          </p>
+        </div>
+      )}
+      {items.map((a) => (
+        <AccountCard key={a.id} account={a} onChanged={load} onSecret={setSecret} />
+      ))}
+    </>
+  );
+}
+
+function AccountCard({ account, onChanged, onSecret }: {
+  account: any;
+  onChanged: () => void;
+  onSecret: (s: { label: string; value: string; hint?: string }) => void;
+}) {
+  const [f, setF] = useState({
+    name: account.name,
+    wabaId: account.wabaId ?? "",
+    displayPhoneNumber: account.displayPhoneNumber ?? "",
+    accessToken: "",
+    n8nInboundWebhookUrl: account.n8nInboundWebhookUrl ?? "",
+    n8nWebhookSecret: "",
+  });
+
+  const save = async () => {
+    const body: any = {
+      name: f.name,
+      wabaId: f.wabaId || undefined,
+      displayPhoneNumber: f.displayPhoneNumber || undefined,
+    };
+    if (f.accessToken) body.accessToken = f.accessToken;
+    if (f.n8nWebhookSecret) body.n8nWebhookSecret = f.n8nWebhookSecret;
+    if (f.n8nInboundWebhookUrl !== (account.n8nInboundWebhookUrl ?? "")) {
+      if (f.n8nInboundWebhookUrl) body.n8nInboundWebhookUrl = f.n8nInboundWebhookUrl;
+      else body.clearWebhookUrl = true;
+    }
     try {
-      await api.post("/config/accounts", {
-        ...form,
-        n8nInboundWebhookUrl: form.n8nInboundWebhookUrl || undefined,
-      });
-      setForm({ name: "", wabaId: "", phoneNumberId: "", displayPhoneNumber: "", accessToken: "", n8nInboundWebhookUrl: "" });
-      await load();
+      await api.patch(`/config/accounts/${account.id}`, body);
+      setF({ ...f, accessToken: "", n8nWebhookSecret: "" });
+      onChanged();
     } catch (e) {
       showError(e);
     }
@@ -319,95 +362,89 @@ function AccountsTab() {
   const act = (fn: () => Promise<unknown>) => async () => {
     try {
       await fn();
-      await load();
+      onChanged();
     } catch (e) {
       showError(e);
     }
   };
 
   return (
-    <>
-      {secret && (
-        <SecretBox
-          label={secret.label}
-          value={secret.value}
-          hint={secret.hint}
-          onClose={() => setSecret(null)}
-        />
-      )}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <h3 style={{ marginTop: 0 }}>Nueva cuenta</h3>
-        <div className="form-grid">
-          <label>Nombre interno<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-          <label>WABA ID<input value={form.wabaId} onChange={(e) => setForm({ ...form, wabaId: e.target.value })} /></label>
-          <label>Phone Number ID<input value={form.phoneNumberId} onChange={(e) => setForm({ ...form, phoneNumberId: e.target.value })} /></label>
-          <label>Número visible<input placeholder="+54 9 11 …" value={form.displayPhoneNumber} onChange={(e) => setForm({ ...form, displayPhoneNumber: e.target.value })} /></label>
-          <label>Access token (System User)<input type="password" value={form.accessToken} onChange={(e) => setForm({ ...form, accessToken: e.target.value })} /></label>
-          <label>Webhook n8n (URL)<input placeholder="https://n8n…/webhook/…" value={form.n8nInboundWebhookUrl} onChange={(e) => setForm({ ...form, n8nInboundWebhookUrl: e.target.value })} /></label>
-        </div>
-        <button className="primary" onClick={create} disabled={!form.name || !form.phoneNumberId || !form.accessToken}>
-          Crear cuenta
-        </button>
+    <div className="card" style={{ marginBottom: 16, maxWidth: 720 }}>
+      <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+        <h3 style={{ margin: 0 }}>{account.name}</h3>
+        <span className={`pill ${account.status === "active" ? "green" : account.status === "error" ? "red" : "yellow"}`}>
+          {account.status}
+        </span>
       </div>
-
-      <table>
-        <thead>
-          <tr><th>Cuenta</th><th>Número</th><th>Estado</th><th>Webhook n8n</th><th>Acciones</th></tr>
-        </thead>
-        <tbody>
-          {items.map((a) => (
-            <tr key={a.id}>
-              <td><strong>{a.name}</strong><br /><span className="muted">{a.phoneNumberId}</span></td>
-              <td>{a.displayPhoneNumber}</td>
-              <td><span className={`pill ${a.status === "active" ? "green" : a.status === "error" ? "red" : "yellow"}`}>{a.status}</span></td>
-              <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>
-                {a.n8nInboundWebhookUrl || "—"}
-                {a.hasWebhookSecret && " 🔏"}
-              </td>
-              <td>
-                <div className="row" style={{ gap: 4 }}>
-                  <button onClick={act(async () => {
-                    const r = await api.post<any>(`/config/accounts/${a.id}/test`);
-                    window.alert(r.ok ? `Conexión OK: ${r.phone ?? ""}` : `Error: ${JSON.stringify(r.detail)}`);
-                  })}>Probar</button>
-                  <button onClick={act(async () => {
-                    const r = await api.post<any>(`/config/accounts/${a.id}/subscribe`);
-                    window.alert(r.ok
-                      ? `WABA suscripta ✅ — apps: ${JSON.stringify(r.subscribedApps)}`
-                      : `Error ${r.status}: ${JSON.stringify(r.detail)}`);
-                  })}>Suscribir WABA</button>
-                  <button onClick={act(async () => {
-                    await api.post(`/config/accounts/${a.id}/test-webhook`);
-                    window.alert("Evento de prueba encolado hacia n8n (ver Logs → Entregas)");
-                  })}>Test n8n</button>
-                  <button onClick={act(async () => {
-                    const token = window.prompt("Nuevo access token (write-only, no se vuelve a mostrar):");
-                    if (token) await api.patch(`/config/accounts/${a.id}`, { accessToken: token });
-                  })}>Token</button>
-                  <button onClick={act(async () => {
-                    const url = window.prompt("URL del webhook n8n (vacío para quitar):", a.n8nInboundWebhookUrl ?? "");
-                    if (url === null) return;
-                    await api.patch(`/config/accounts/${a.id}`, url ? { n8nInboundWebhookUrl: url } : { clearWebhookUrl: true });
-                  })}>URL n8n</button>
-                  <button onClick={act(async () => {
-                    const value = crypto.randomUUID().replace(/-/g, "");
-                    await api.patch(`/config/accounts/${a.id}`, { n8nWebhookSecret: value });
-                    setSecret({
-                      label: `Secreto HMAC del webhook — cuenta "${a.name}"`,
-                      value,
-                      hint: "Usalo en n8n para validar la firma X-Signature-256. No se vuelve a mostrar.",
-                    });
-                  })}>Secreto</button>
-                  <button onClick={act(() => api.patch(`/config/accounts/${a.id}`, { status: a.status === "paused" ? "active" : "paused" }))}>
-                    {a.status === "paused" ? "Activar" : "Pausar"}
-                  </button>
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </>
+      <div className="form-grid">
+        <label>Nombre interno
+          <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+        </label>
+        <label>Phone Number ID (identidad, no editable)
+          <input readOnly value={account.phoneNumberId} style={{ background: "#f3f4f6" }} />
+        </label>
+        <label>WABA ID
+          <input value={f.wabaId} onChange={(e) => setF({ ...f, wabaId: e.target.value })} />
+        </label>
+        <label>Número visible
+          <input placeholder="+54 9 11 …" value={f.displayPhoneNumber}
+                 onChange={(e) => setF({ ...f, displayPhoneNumber: e.target.value })} />
+        </label>
+        <label>Access token {account.tokenSet ? "✅ configurado" : "⚠️ falta (no se puede responder)"}
+          <input type="password"
+                 placeholder={account.tokenSet ? "(reemplazar…)" : "token permanente de System User"}
+                 value={f.accessToken}
+                 onChange={(e) => setF({ ...f, accessToken: e.target.value })} />
+        </label>
+        <label>Webhook n8n propio (opcional; pisa el global)
+          <input placeholder="vacío = usa el webhook global" value={f.n8nInboundWebhookUrl}
+                 onChange={(e) => setF({ ...f, n8nInboundWebhookUrl: e.target.value })} />
+        </label>
+        <label>Secreto HMAC propio {account.hasWebhookSecret ? "✅" : "(opcional)"}
+          <div className="row">
+            <input type="password" style={{ flex: 1 }}
+                   placeholder={account.hasWebhookSecret ? "(reemplazar…)" : "firma del webhook propio"}
+                   value={f.n8nWebhookSecret}
+                   onChange={(e) => setF({ ...f, n8nWebhookSecret: e.target.value })} />
+            <button onClick={() => {
+              const s = crypto.randomUUID().replace(/-/g, "");
+              setF({ ...f, n8nWebhookSecret: s });
+              onSecret({
+                label: `Secreto HMAC — cuenta "${account.name}"`,
+                value: s,
+                hint: "Guardalo para validar X-Signature-256 en n8n y tocá Guardar para aplicarlo.",
+              });
+            }}>Generar</button>
+          </div>
+        </label>
+      </div>
+      <div className="row" style={{ gap: 6 }}>
+        <button className="primary" onClick={save}>Guardar</button>
+        <button onClick={act(async () => {
+          const r = await api.post<any>(`/config/accounts/${account.id}/test`);
+          window.alert(r.ok ? `Conexión OK: ${r.phone ?? ""}` : `Error: ${JSON.stringify(r.detail)}`);
+        })}>Probar conexión</button>
+        <button onClick={act(async () => {
+          const r = await api.post<any>(`/config/accounts/${account.id}/subscribe`);
+          window.alert(r.ok
+            ? `WABA suscripta ✅ — apps: ${JSON.stringify(r.subscribedApps)}`
+            : `Error ${r.status}: ${JSON.stringify(r.detail)}`);
+        })}>Suscribir WABA</button>
+        <button onClick={act(async () => {
+          await api.post(`/config/accounts/${account.id}/test-webhook`);
+          window.alert("Evento de prueba encolado hacia n8n (ver Logs → Entregas)");
+        })}>Test n8n</button>
+        <button onClick={act(() =>
+          api.patch(`/config/accounts/${account.id}`,
+                    { status: account.status === "paused" ? "active" : "paused" }))}>
+          {account.status === "paused" ? "Activar" : "Pausar"}
+        </button>
+        <button className="danger" onClick={act(async () => {
+          if (!window.confirm(`¿Borrar la cuenta "${account.name}"? Solo posible sin historial.`)) return;
+          await api.del(`/config/accounts/${account.id}`);
+        })}>Eliminar</button>
+      </div>
+    </div>
   );
 }
 
