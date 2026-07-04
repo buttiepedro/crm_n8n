@@ -1,11 +1,70 @@
 /** Panel técnico: exige step-up con la contraseña explícita del .env
  *  (ADMIN_PANEL_PASSWORD). Desde acá se configura TODO lo demás: tokens de
  *  Meta, cuentas WhatsApp, webhooks n8n, API keys, usuarios y logs. */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, showError } from "../api";
 import { useAuth } from "../auth";
 
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : "—");
+
+/** Muestra un secreto recién generado en un cuadro copiable (los alert() de
+ *  Chrome no dejan copiar). Funciona también sobre HTTP (sin clipboard API). */
+function SecretBox({
+  label,
+  value,
+  hint,
+  onClose,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    ref.current?.select();
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(value);
+      ok = true;
+    } catch {
+      try {
+        ok = document.execCommand("copy"); // fallback en HTTP
+      } catch {
+        ok = false;
+      }
+    }
+    setCopied(ok);
+    if (ok) setTimeout(() => setCopied(false), 2500);
+  };
+
+  return (
+    <div
+      className="card"
+      style={{ marginBottom: 16, borderColor: "#f59e0b", background: "#fffbeb" }}
+    >
+      <strong>⚠ {label}</strong>
+      <p className="muted" style={{ margin: "6px 0" }}>
+        {hint ?? "Guardalo ahora: no se vuelve a mostrar."}
+      </p>
+      <div className="row">
+        <input
+          ref={ref}
+          readOnly
+          value={value}
+          onFocus={(e) => e.target.select()}
+          style={{ flex: 1, fontFamily: "monospace", fontSize: 13 }}
+        />
+        <button className="primary" onClick={copy}>
+          {copied ? "✓ Copiado" : "Copiar"}
+        </button>
+        <button onClick={onClose}>Listo, lo guardé</button>
+      </div>
+    </div>
+  );
+}
 
 export default function Config() {
   const [unlocked, setUnlocked] = useState<boolean | null>(null);
@@ -97,6 +156,7 @@ function PlatformTab() {
   const [graphVersion, setGraphVersion] = useState("");
   const [n8nUrl, setN8nUrl] = useState("");
   const [n8nSecret, setN8nSecret] = useState("");
+  const [reveal, setReveal] = useState<{ label: string; value: string; hint?: string } | null>(null);
 
   const load = async () => {
     const d = await api.get<any>("/config/platform");
@@ -131,7 +191,11 @@ function PlatformTab() {
     try {
       const r = await api.post<any>("/config/platform/generate-verify-token");
       await load();
-      window.alert(`Nuevo verify token (pegalo en la config del webhook de Meta):\n\n${r.verifyToken}`);
+      setReveal({
+        label: "Verify token generado",
+        value: r.verifyToken,
+        hint: "Pegalo en la configuración del webhook de tu app de Meta (queda visible también en el campo de abajo).",
+      });
     } catch (e) {
       showError(e);
     }
@@ -139,6 +203,14 @@ function PlatformTab() {
 
   return (
     <div className="card" style={{ maxWidth: 640 }}>
+      {reveal && (
+        <SecretBox
+          label={reveal.label}
+          value={reveal.value}
+          hint={reveal.hint}
+          onClose={() => setReveal(null)}
+        />
+      )}
       <h3 style={{ marginTop: 0 }}>Credenciales de Meta (globales)</h3>
       <p className="muted">
         El webhook de Meta apunta a <code className="k">/api/v1/whatsapp/webhook</code> de esta
@@ -197,7 +269,11 @@ function PlatformTab() {
               onClick={() => {
                 const s = crypto.randomUUID().replace(/-/g, "");
                 setN8nSecret(s);
-                window.alert(`Secreto generado (guardalo para validar la firma en n8n):\n\n${s}\n\nTocá Guardar para aplicarlo.`);
+                setReveal({
+                  label: "Secreto HMAC generado para el webhook global",
+                  value: s,
+                  hint: "Guardalo para validar X-Signature-256 en n8n y tocá Guardar para aplicarlo acá.",
+                });
               }}
             >
               Generar
@@ -216,6 +292,7 @@ function PlatformTab() {
 
 function AccountsTab() {
   const [items, setItems] = useState<any[]>([]);
+  const [secret, setSecret] = useState<{ label: string; value: string; hint?: string } | null>(null);
   const [form, setForm] = useState({
     name: "", wabaId: "", phoneNumberId: "", displayPhoneNumber: "",
     accessToken: "", n8nInboundWebhookUrl: "",
@@ -250,6 +327,14 @@ function AccountsTab() {
 
   return (
     <>
+      {secret && (
+        <SecretBox
+          label={secret.label}
+          value={secret.value}
+          hint={secret.hint}
+          onClose={() => setSecret(null)}
+        />
+      )}
       <div className="card" style={{ marginBottom: 16 }}>
         <h3 style={{ marginTop: 0 }}>Nueva cuenta</h3>
         <div className="form-grid">
@@ -299,9 +384,13 @@ function AccountsTab() {
                     await api.patch(`/config/accounts/${a.id}`, url ? { n8nInboundWebhookUrl: url } : { clearWebhookUrl: true });
                   })}>URL n8n</button>
                   <button onClick={act(async () => {
-                    const secret = crypto.randomUUID().replace(/-/g, "");
-                    await api.patch(`/config/accounts/${a.id}`, { n8nWebhookSecret: secret });
-                    window.alert(`Secreto HMAC del webhook (guardalo en n8n, no se repite):\n\n${secret}`);
+                    const value = crypto.randomUUID().replace(/-/g, "");
+                    await api.patch(`/config/accounts/${a.id}`, { n8nWebhookSecret: value });
+                    setSecret({
+                      label: `Secreto HMAC del webhook — cuenta "${a.name}"`,
+                      value,
+                      hint: "Usalo en n8n para validar la firma X-Signature-256. No se vuelve a mostrar.",
+                    });
                   })}>Secreto</button>
                   <button onClick={act(() => api.patch(`/config/accounts/${a.id}`, { status: a.status === "paused" ? "active" : "paused" }))}>
                     {a.status === "paused" ? "Activar" : "Pausar"}
@@ -321,6 +410,7 @@ function AccountsTab() {
 function KeysTab() {
   const [items, setItems] = useState<any[]>([]);
   const [name, setName] = useState("");
+  const [newKey, setNewKey] = useState<string | null>(null);
 
   const load = () => api.get<any>("/config/api-keys").then((d) => setItems(d.items)).catch(showError);
   useEffect(() => {
@@ -332,7 +422,7 @@ function KeysTab() {
       const r = await api.post<any>("/config/api-keys", { name });
       setName("");
       await load();
-      window.alert(`API key creada (GUARDALA, no se vuelve a mostrar):\n\n${r.apiKey}\n\nEn n8n: header Authorization: Bearer <key>`);
+      setNewKey(r.apiKey);
     } catch (e) {
       showError(e);
     }
@@ -340,6 +430,14 @@ function KeysTab() {
 
   return (
     <>
+      {newKey && (
+        <SecretBox
+          label="API key creada"
+          value={newKey}
+          hint='Guardala ahora: no se vuelve a mostrar. En n8n: header Authorization con valor "Bearer <key>".'
+          onClose={() => setNewKey(null)}
+        />
+      )}
       <div className="row" style={{ marginBottom: 14 }}>
         <input placeholder="Nombre (ej: n8n-produccion)" value={name} onChange={(e) => setName(e.target.value)} />
         <button className="primary" onClick={create} disabled={!name.trim()}>Crear API key</button>
