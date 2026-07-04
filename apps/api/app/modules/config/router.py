@@ -79,8 +79,9 @@ class PlatformIn(CamelModel):
     verify_token: str | None = None
     app_secret: str | None = None
     graph_api_version: str | None = None
-    n8n_webhook_url: str | None = None  # "" → quitar
-    n8n_webhook_secret: str | None = None
+    # alias explícito: to_camel("n8n_…") generaría "n8N…" (el 8 rompe el camelCase)
+    n8n_webhook_url: str | None = Field(None, alias="n8nWebhookUrl")  # "" → quitar
+    n8n_webhook_secret: str | None = Field(None, alias="n8nWebhookSecret")
 
 
 @router.put("/platform")
@@ -155,8 +156,8 @@ class AccountIn(CamelModel):
     phone_number_id: str
     display_phone_number: str
     access_token: str = Field(min_length=10)  # write-only: jamás se devuelve
-    n8n_inbound_webhook_url: str | None = None
-    n8n_webhook_secret: str | None = None
+    n8n_inbound_webhook_url: str | None = Field(None, alias="n8nInboundWebhookUrl")
+    n8n_webhook_secret: str | None = Field(None, alias="n8nWebhookSecret")
 
 
 @router.post("/accounts", status_code=201)
@@ -192,8 +193,8 @@ class AccountPatch(CamelModel):
     display_phone_number: str | None = None
     status: WaAccountStatus | None = None
     access_token: str | None = None  # reemplazo write-only
-    n8n_inbound_webhook_url: str | None = None
-    n8n_webhook_secret: str | None = None
+    n8n_inbound_webhook_url: str | None = Field(None, alias="n8nInboundWebhookUrl")
+    n8n_webhook_secret: str | None = Field(None, alias="n8nWebhookSecret")
     clear_webhook_url: bool = False
 
 
