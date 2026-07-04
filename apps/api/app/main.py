@@ -14,6 +14,7 @@ from app.core.logging import configure_logging
 from app.db.session import dispose_engine, init_engine
 from app.infra.queue import get_queue, init_queue
 from app.infra.storage import init_storage
+from app.modules.analytics.router import router as analytics_router
 from app.modules.auth.router import router as auth_router
 from app.modules.config.router import router as config_router
 from app.modules.conversations.router import router as conversations_router
@@ -87,6 +88,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations_router, prefix="/api/v1")
     app.include_router(leads_router, prefix="/api/v1")
     app.include_router(config_router, prefix="/api/v1")
+    app.include_router(analytics_router, prefix="/api/v1")
     return app
 
 
