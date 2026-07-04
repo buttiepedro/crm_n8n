@@ -191,6 +191,7 @@ async def create_account(
 class AccountPatch(CamelModel):
     name: str | None = None
     waba_id: str | None = None
+    phone_number_id: str | None = None  # corregible mientras esté mal cargado
     display_phone_number: str | None = None
     status: WaAccountStatus | None = None
     access_token: str | None = None  # reemplazo write-only
@@ -215,6 +216,17 @@ async def update_account(
         account.name = body.name; changed.append("name")
     if body.waba_id:
         account.waba_id = body.waba_id; changed.append("waba_id")
+    if body.phone_number_id and body.phone_number_id != account.phone_number_id:
+        dup = (await db.execute(
+            sa.select(WhatsAppAccount.id).where(
+                WhatsAppAccount.phone_number_id == body.phone_number_id,
+                WhatsAppAccount.id != account.id,
+            )
+        )).scalar_one_or_none()
+        if dup:
+            raise ConflictError("Ya existe otra cuenta con ese Phone Number ID")
+        account.phone_number_id = body.phone_number_id
+        changed.append("phone_number_id")
     if body.display_phone_number:
         account.display_phone_number = body.display_phone_number; changed.append("phone")
     if body.status is not None:

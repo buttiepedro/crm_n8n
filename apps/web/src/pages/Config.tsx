@@ -332,6 +332,7 @@ function AccountCard({ account, onChanged, onSecret }: {
   const [f, setF] = useState({
     name: account.name,
     wabaId: account.wabaId ?? "",
+    phoneNumberId: account.phoneNumberId ?? "",
     displayPhoneNumber: account.displayPhoneNumber ?? "",
     accessToken: "",
     n8nInboundWebhookUrl: account.n8nInboundWebhookUrl ?? "",
@@ -342,6 +343,7 @@ function AccountCard({ account, onChanged, onSecret }: {
     const body: any = {
       name: f.name,
       wabaId: f.wabaId || undefined,
+      phoneNumberId: f.phoneNumberId || undefined,
       displayPhoneNumber: f.displayPhoneNumber || undefined,
     };
     if (f.accessToken) body.accessToken = f.accessToken;
@@ -380,8 +382,9 @@ function AccountCard({ account, onChanged, onSecret }: {
         <label>Nombre interno
           <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
         </label>
-        <label>Phone Number ID (identidad, no editable)
-          <input readOnly value={account.phoneNumberId} style={{ background: "#f3f4f6" }} />
+        <label>Phone Number ID (Meta → WhatsApp → API Setup)
+          <input value={f.phoneNumberId}
+                 onChange={(e) => setF({ ...f, phoneNumberId: e.target.value })} />
         </label>
         <label>WABA ID
           <input value={f.wabaId} onChange={(e) => setF({ ...f, wabaId: e.target.value })} />

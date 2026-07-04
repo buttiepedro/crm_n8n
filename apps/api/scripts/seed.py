@@ -5,17 +5,15 @@ Uso:  uv run python scripts/seed.py   (requiere DB migrada: alembic upgrade head
 """
 
 import asyncio
-import os
 import secrets
 
 import sqlalchemy as sa
 
 from app.core.config import get_settings
 from app.core.security import generate_api_key
-from app.db.models import ApiKey, Pipeline, PipelineStage, User, WhatsAppAccount
+from app.db.models import ApiKey, Pipeline, PipelineStage, User
 from app.db.models.enums import UserRole
 from app.db.session import get_sessionmaker, init_engine
-from app.modules.accounts.service import encrypt_access_token
 from app.modules.auth.passwords import hash_password
 from app.modules.hooks.auth import SCOPE_HOOKS_LEADS, SCOPE_HOOKS_MESSAGES
 
@@ -68,34 +66,8 @@ async def main() -> None:
         else:
             print("• Pipeline por defecto ya existe")
 
-        # Cuenta WhatsApp de prueba
-        account = (
-            await session.execute(
-                sa.select(WhatsAppAccount).where(WhatsAppAccount.phone_number_id == "000000000000")
-            )
-        ).scalar_one_or_none()
-        if account is None:
-            account = WhatsAppAccount(
-                name="Cuenta de prueba",
-                waba_id="TEST_WABA",
-                phone_number_id="000000000000",
-                display_phone_number="+54 9 11 0000-0000",
-                access_token_ciphertext=b"pendiente",
-                # n8n es externo: N8N_WEBHOOK_BASE viene del .env
-                # (desde Docker, "localhost" no es tu máquina → host.docker.internal)
-                n8n_inbound_webhook_url=(
-                    os.environ.get("N8N_WEBHOOK_BASE", "http://localhost:5678")
-                    + "/webhook/whatsapp-in"
-                ),
-            )
-            session.add(account)
-            await session.flush()
-            account.access_token_ciphertext = encrypt_access_token(
-                settings, account.id, "TOKEN_DE_PRUEBA_REEMPLAZAR"
-            )
-            print("✔ Cuenta WhatsApp de prueba creada (reemplazar token desde el panel/DB)")
-        else:
-            print("• Cuenta de prueba ya existe")
+        # Nota: ya NO se crea cuenta de prueba. Las cuentas se auto-registran
+        # cuando llega el primer mensaje de WhatsApp (o se crean por el panel).
 
         # API key para n8n
         existing_key = (
