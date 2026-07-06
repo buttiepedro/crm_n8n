@@ -62,6 +62,12 @@ class Conversation(UUIDPkMixin, TimestampedMixin, Base):
     # Último mensaje ENTRANTE: define la ventana de 24h de WhatsApp
     last_inbound_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     unread_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    # Silencia el bot (n8n) para esta conversación: el mensaje entrante se
+    # persiste igual pero no se reenvía al webhook, así el bot no autorresponde
+    # mientras un agente toma el control manual.
+    bot_paused: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, default=False, server_default=sa.text("false")
+    )
 
 
 class Message(UUIDPkMixin, CreatedAtMixin, Base):

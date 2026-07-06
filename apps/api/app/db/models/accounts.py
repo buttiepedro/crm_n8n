@@ -31,3 +31,9 @@ class WhatsAppAccount(UUIDPkMixin, TimestampedMixin, Base):
     settings: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=sa.text("'{}'::jsonb")
     )
+    # Cuenta sintética del chat de prueba (panel técnico → n8n): usa el mismo
+    # camino de ingesta/dispatch que WhatsApp real, pero el envío saliente se
+    # simula (nunca llama a la Graph API de Meta). Ver modules/messages/outbound.py.
+    is_test: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, default=False, server_default=sa.text("false")
+    )

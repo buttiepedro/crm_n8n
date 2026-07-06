@@ -221,6 +221,7 @@ POST /api/v1/hooks/n8n/leads
 ```jsonc
 {
   "event": "message.received", "eventId": "…", "occurredAt": "2026-07-04T…Z",
+  "test": false,   // true si viene del chat de prueba (panel técnico → n8n), nunca WhatsApp real
   "account":      { "id", "name", "phoneNumberId", "displayPhoneNumber" },
   "conversation": { "id", "status", "assignedUserId" },       // id → usarlo para responder
   "contact":      { "id", "waId", "profileName" },
@@ -282,6 +283,17 @@ git pull && docker compose up -d --build   # actualizar (migraciones corren sola
 docker exec crm_n8n_db pg_dump -U crm crm > backup_$(date +%F).sql   # backup (cronear diario)
 docker compose down                        # apagar (datos persisten en volúmenes)
 docker compose down -v                     # ⚠ borra TODO, incluida la DB
+```
+
+### Recargar después de un cambio (desarrollo)
+
+```bash
+docker compose up -d --build api web migrate   # rebuild + recrea api/web (corre migraciones)
+docker compose restart api web                 # sin rebuild: solo cambió config/.env
+docker compose logs -f api                      # seguir logs en vivo
+docker compose stop                             # pausar todo (containers quedan, nada se borra)
+docker compose down                             # borra containers + red (volúmenes de DB quedan)
+docker compose down -v                          # ⚠ borra TODO, incluida la base de datos
 ```
 
 Dentro del panel técnico: **Logs → Auditoría** (quién hizo qué), **Entregas n8n** (cada intento, con botón de re-entrega) y **Mensajes fallidos** (con re-encolado).

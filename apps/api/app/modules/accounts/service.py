@@ -19,6 +19,10 @@ from app.db.models import WhatsAppAccount
 # recibe y reenvía a n8n, pero NO puede enviar hasta pegar el token en el panel.
 TOKEN_PENDING = b"pendiente"
 
+# Cuenta sintética única para el chat de prueba del panel técnico (is_test=True).
+# phone_number_id fijo: nunca colisiona con un Phone Number ID real de Meta.
+TEST_ACCOUNT_PHONE_NUMBER_ID = "test-channel"
+
 
 def has_token(account: WhatsAppAccount) -> bool:
     return bool(account.access_token_ciphertext) and account.access_token_ciphertext != TOKEN_PENDING
@@ -35,6 +39,24 @@ async def get_account_by_phone_number_id(
         sa.select(WhatsAppAccount).where(WhatsAppAccount.phone_number_id == phone_number_id)
     )
     return result.scalar_one_or_none()
+
+
+async def get_or_create_test_account(session: AsyncSession) -> WhatsAppAccount:
+    """Cuenta única del chat de prueba (idempotente). Sin token: el envío
+    saliente para esta cuenta se simula, nunca llama a la Graph API."""
+    account = await get_account_by_phone_number_id(session, TEST_ACCOUNT_PHONE_NUMBER_ID)
+    if account is None:
+        account = WhatsAppAccount(
+            name="Canal de prueba (n8n)",
+            waba_id="test",
+            phone_number_id=TEST_ACCOUNT_PHONE_NUMBER_ID,
+            display_phone_number="test",
+            access_token_ciphertext=TOKEN_PENDING,
+            is_test=True,
+        )
+        session.add(account)
+        await session.flush()
+    return account
 
 
 def _cipher(settings: Settings) -> CredentialsCipher:

@@ -45,12 +45,13 @@ def _conversation_row(c: Conversation, contact: Contact, account: WhatsAppAccoun
         "status": c.status.value,
         "contact": {"id": str(contact.id), "waId": contact.wa_id,
                     "profileName": contact.profile_name},
-        "account": {"id": str(account.id), "name": account.name},
+        "account": {"id": str(account.id), "name": account.name, "isTest": account.is_test},
         "assignedUserId": str(c.assigned_user_id) if c.assigned_user_id else None,
         "lastMessageAt": c.last_message_at.isoformat() if c.last_message_at else None,
         "lastMessagePreview": (last_body or "")[:120],
         "unreadCount": c.unread_count,
         "windowOpen": is_window_open(c.last_inbound_at),
+        "botPaused": c.bot_paused,
         "leadId": str(lead_id) if lead_id else None,
     }
 
@@ -222,6 +223,7 @@ class ConversationPatch(CamelModel):
     status: ConversationStatus | None = None
     assigned_user_id: uuid.UUID | None = None
     unassign: bool = False
+    bot_paused: bool | None = None
 
 
 @router.patch("/conversations/{conversation_id}")
@@ -243,6 +245,12 @@ async def patch_conversation(
         if not auth.has(perms.CONVERSATIONS_ASSIGN):
             raise ForbiddenError("Sin permiso para asignar conversaciones")
         conv.assigned_user_id = None if body.unassign else body.assigned_user_id
+    if body.bot_paused is not None:
+        # Mismo permiso que responder manualmente: quien puede tomar la
+        # conversación puede silenciar al bot para hacerlo.
+        if not auth.has(perms.CONVERSATIONS_SEND):
+            raise ForbiddenError("Sin permiso para silenciar el bot")
+        conv.bot_paused = body.bot_paused
 
     await log_event(db, actor_type="user", actor_id=auth.user.id,
                     action="conversation.updated", entity_type="conversation",

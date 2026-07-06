@@ -62,7 +62,7 @@ async def queue_outbound_message(
 
     if account.status == WaAccountStatus.paused:
         raise AccountPausedError(f"La cuenta '{account.name}' está pausada")
-    if not has_token(account):
+    if not account.is_test and not has_token(account):
         raise ConflictError(
             f"La cuenta '{account.name}' no tiene access token cargado: "
             "pegalo en el panel técnico → Cuentas para poder enviar",
@@ -125,6 +125,15 @@ async def handle_send_message(payload: dict) -> None:
         conversation = await session.get(Conversation, message.conversation_id)
         contact = await session.get(Contact, conversation.contact_id)
         account = await session.get(WhatsAppAccount, message.whatsapp_account_id)
+
+        if account.is_test:
+            # Canal de prueba: nunca se llama a la Graph API de Meta, se
+            # simula la entrega para poder ver la respuesta de n8n en el CRM.
+            message.wamid = f"test.{uuid.uuid4()}"
+            message.status = MessageStatus.sent
+            await session.commit()
+            log.info("outbound_sent_test", message_id=str(message.id))
+            return
 
         try:
             access_token = decrypt_access_token(settings, account)

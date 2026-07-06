@@ -59,6 +59,11 @@ async def create_message_received_delivery(
     URL destino: la de la cuenta si tiene una propia; si no, el webhook
     GLOBAL de n8n (panel técnico). Sin ninguno de los dos → no se reenvía
     (el mensaje igual queda persistido)."""
+    if conversation.bot_paused:
+        # Bot silenciado por un agente: el mensaje se guarda pero no se
+        # reenvía a n8n, para que el bot no autorresponda.
+        return None
+
     target_url = account.n8n_inbound_webhook_url or await get_setting(
         session, KEY_N8N_WEBHOOK_URL
     )
@@ -71,6 +76,9 @@ async def create_message_received_delivery(
         "event": EVENT_MESSAGE_RECEIVED,
         "eventId": str(uuid7()),
         "occurredAt": datetime.now(UTC).isoformat(),
+        # true si la conversación es del canal de prueba (panel técnico → n8n),
+        # nunca un mensaje real de WhatsApp: útil para ramificar el workflow.
+        "test": account.is_test,
         "account": {
             "id": str(account.id),
             "name": account.name,

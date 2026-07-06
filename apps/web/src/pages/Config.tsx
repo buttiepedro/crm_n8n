@@ -1,7 +1,7 @@
 /** Panel técnico: exige step-up con la contraseña explícita del .env
  *  (ADMIN_PANEL_PASSWORD). Desde acá se configura TODO lo demás: tokens de
  *  Meta, cuentas WhatsApp, webhooks n8n, API keys, usuarios y logs. */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api, showError } from "../api";
 import { useAuth } from "../auth";
 
@@ -100,6 +100,7 @@ export default function Config() {
         {[
           ["plataforma", "WhatsApp / Meta"],
           ["cuentas", "Cuenta"],
+          ["n8n", "n8n"],
           ["keys", "API Keys n8n"],
           ["usuarios", "Usuarios"],
           ["logs", "Logs"],
@@ -111,6 +112,7 @@ export default function Config() {
       </div>
       {tab === "plataforma" && <PlatformTab />}
       {tab === "cuentas" && <AccountsTab />}
+      {tab === "n8n" && <N8nTestTab />}
       {tab === "keys" && <KeysTab />}
       {tab === "usuarios" && <UsersTab />}
       {tab === "logs" && <LogsTab />}
@@ -451,6 +453,344 @@ function AccountCard({ account, onChanged, onSecret }: {
           if (!window.confirm(`¿Borrar la cuenta "${account.name}"? Solo posible sin historial.`)) return;
           await api.del(`/config/accounts/${account.id}`);
         })}>Eliminar</button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Chat de prueba (n8n) ────────────────────────────────────────────── */
+
+function N8nTestTab() {
+  const [sessionId, setSessionId] = useState(
+    () => localStorage.getItem("n8nTestSessionId") || crypto.randomUUID().slice(0, 8)
+  );
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [msgs, setMsgs] = useState<any[]>([]);
+  const [deliveries, setDeliveries] = useState<any[]>([]);
+  const [text, setText] = useState("");
+  const [account, setAccount] = useState<any>(null);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [lastSentAt, setLastSentAt] = useState<number | null>(null);
+  const [waitingUntil, setWaitingUntil] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const WAIT_MS = 5 * 60 * 1000;
+
+  // Cada mensaje entrante genera una fila en webhook_deliveries (mismo m.id
+  // que payload.message.id): así sabemos si YA llegó a n8n o sigue reintentando.
+  const deliveryByMessageId = useMemo(() => {
+    const map: Record<string, any> = {};
+    for (const d of deliveries) {
+      const msgId = d.payload?.message?.id;
+      if (msgId) map[msgId] = d;
+    }
+    return map;
+  }, [deliveries]);
+
+  useEffect(() => {
+    localStorage.setItem("n8nTestSessionId", sessionId);
+  }, [sessionId]);
+
+  const loadAccount = useCallback(() => {
+    api
+      .get<any>("/config/n8n-test/account")
+      .then((a) => {
+        setAccount(a);
+        setWebhookUrl(a.n8nInboundWebhookUrl ?? "");
+      })
+      .catch(showError);
+  }, []);
+
+  useEffect(() => {
+    loadAccount();
+  }, [loadAccount]);
+
+  const resolveSession = useCallback(async () => {
+    try {
+      const r = await api.get<{ conversationId: string | null }>(
+        `/config/n8n-test/session/${encodeURIComponent(sessionId)}`
+      );
+      setConversationId(r.conversationId);
+    } catch (e) {
+      showError(e);
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    setMsgs([]);
+    setDeliveries([]);
+    setConversationId(null);
+    setLastSentAt(null);
+    setWaitingUntil(null);
+    resolveSession();
+  }, [sessionId, resolveSession]);
+
+  const loadThread = useCallback(async () => {
+    if (!conversationId) return;
+    try {
+      const [m, d] = await Promise.all([
+        api.get<{ items: any[] }>(`/conversations/${conversationId}/messages`),
+        api.get<{ items: any[] }>(`/config/webhook-deliveries?conversationId=${conversationId}`),
+      ]);
+      setMsgs(m.items);
+      setDeliveries(d.items);
+    } catch {
+      /* polling */
+    }
+  }, [conversationId]);
+
+  useEffect(() => {
+    loadThread();
+    const t = setInterval(loadThread, 3000);
+    return () => clearInterval(t);
+  }, [loadThread]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView();
+  }, [msgs.length]);
+
+  // ¿Ya llegó una respuesta (mensaje outbound) posterior al último envío?
+  const hasReplyAfterSend =
+    lastSentAt != null &&
+    msgs.some((m) => m.direction === "outbound" && new Date(m.createdAt).getTime() > lastSentAt);
+
+  useEffect(() => {
+    if (hasReplyAfterSend) setWaitingUntil(null);
+  }, [hasReplyAfterSend]);
+
+  // Tick de 1s solo mientras esperamos, para el contador — la búsqueda real
+  // ya la hace el polling de arriba (cada 3s, bastante más seguido que 30s).
+  useEffect(() => {
+    if (waitingUntil === null) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [waitingUntil]);
+
+  const waiting = waitingUntil !== null && !hasReplyAfterSend && now < waitingUntil;
+  const timedOut = waitingUntil !== null && !hasReplyAfterSend && now >= waitingUntil;
+
+  const send = async () => {
+    if (!text.trim()) return;
+    try {
+      const r = await api.post<{ conversationId: string | null }>("/config/n8n-test/messages", {
+        sessionId,
+        body: text.trim(),
+      });
+      setText("");
+      if (r.conversationId) setConversationId(r.conversationId);
+      const sentAt = Date.now();
+      setLastSentAt(sentAt);
+      setWaitingUntil(sentAt + WAIT_MS);
+      setNow(sentAt);
+      await loadThread();
+    } catch (e) {
+      showError(e);
+    }
+  };
+
+  const newSession = () => setSessionId(crypto.randomUUID().slice(0, 8));
+
+  const saveWebhook = async () => {
+    if (!account) return;
+    try {
+      const body: any = {};
+      if (webhookUrl !== (account.n8nInboundWebhookUrl ?? "")) {
+        if (webhookUrl) body.n8nInboundWebhookUrl = webhookUrl;
+        else body.clearWebhookUrl = true;
+      }
+      if (webhookSecret) body.n8nWebhookSecret = webhookSecret;
+      await api.patch(`/config/accounts/${account.id}`, body);
+      setWebhookSecret("");
+      loadAccount();
+      window.alert("Guardado");
+    } catch (e) {
+      showError(e);
+    }
+  };
+
+  return (
+    <div className="row" style={{ alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+      <div className="card" style={{ flex: "1 1 320px", maxWidth: 420 }}>
+        <h3 style={{ marginTop: 0 }}>Webhook del canal de prueba</h3>
+        <p className="muted">
+          Los mensajes de acá abajo se guardan y se reenvían con el MISMO payload/firma que un
+          mensaje real de WhatsApp (mismo <code className="k">ingest</code>). La respuesta de n8n
+          llega por el hook de siempre (<code className="k">/hooks/n8n/messages</code>) y se
+          guarda igual — solo que no se llama a la Graph API de Meta.
+        </p>
+        <div className="form-grid">
+          <label>
+            URL del webhook (vacío = usa el global de Plataforma)
+            <input
+              placeholder="https://n8n…/webhook/test"
+              value={webhookUrl}
+              onChange={(e) => setWebhookUrl(e.target.value)}
+            />
+          </label>
+          <label>
+            Secreto HMAC {account?.hasWebhookSecret ? "✅ configurado" : "(opcional)"}
+            <input
+              type="password"
+              placeholder={account?.hasWebhookSecret ? "(reemplazar…)" : "firma X-Signature-256"}
+              value={webhookSecret}
+              onChange={(e) => setWebhookSecret(e.target.value)}
+            />
+          </label>
+        </div>
+        <button className="primary" onClick={saveWebhook}>
+          Guardar
+        </button>
+
+        <h3>Sesión</h3>
+        <p className="muted">
+          El ID identifica la conversación de prueba (simula el número de WhatsApp del cliente).
+          Cambialo para arrancar otra conversación desde cero; el mismo ID siempre vuelve a la
+          misma sesión.
+        </p>
+        <div className="row">
+          <input
+            style={{ flex: 1 }}
+            value={sessionId}
+            onChange={(e) => setSessionId(e.target.value)}
+          />
+          <button onClick={newSession}>Nueva sesión</button>
+        </div>
+      </div>
+
+      <div
+        className="card"
+        style={{ flex: "2 1 420px", display: "flex", flexDirection: "column", minHeight: 460, padding: 0 }}
+      >
+        <div className="pane-head">
+          <strong>Chat de prueba</strong>
+          <span className="pill yellow">canal test</span>
+          <span className="muted">sesión: {sessionId}</span>
+        </div>
+        <div className="msgs">
+          {msgs.map((m) => {
+            const delivery = m.direction === "inbound" ? deliveryByMessageId[m.id] : null;
+            return (
+              <div key={m.id} className={`bubble ${m.direction === "inbound" ? "in" : "out"}`}>
+                {m.body || <i>[{m.type}]</i>}
+                <div className="meta">
+                  {m.direction === "outbound" &&
+                    `${m.origin === "n8n" ? "n8n" : "agente"} · ${m.status} · `}
+                  {delivery && (
+                    <span
+                      className={`pill ${delivery.succeeded ? "green" : "yellow"}`}
+                      style={{ marginRight: 6 }}
+                      title={
+                        delivery.succeeded
+                          ? `Entregado a n8n (HTTP ${delivery.responseStatus})`
+                          : `Reintentando — intento ${delivery.attempt}, último HTTP ${delivery.responseStatus ?? "sin respuesta"}`
+                      }
+                    >
+                      {delivery.succeeded ? "✓ n8n" : `⏳ n8n (${delivery.attempt})`}
+                    </span>
+                  )}
+                  {fmt(m.createdAt)}
+                </div>
+              </div>
+            );
+          })}
+          {msgs.length === 0 && <p className="muted">Escribí algo para arrancar la sesión.</p>}
+          <div ref={bottomRef} />
+        </div>
+        {waiting && (
+          <div className="muted" style={{ padding: "0 12px 8px", fontSize: 12 }}>
+            ⏳ Esperando respuesta de n8n… (se deja de buscar en{" "}
+            {Math.max(0, Math.ceil((waitingUntil! - now) / 1000))}s)
+          </div>
+        )}
+        {timedOut && (
+          <div className="bot-warning" style={{ margin: "0 12px 8px" }}>
+            ⚠ n8n no respondió en 5 min. El chat se sigue actualizando solo — revisá que el
+            workflow esté activo/escuchando, o mirá el intento en "Entregas hacia n8n" abajo.
+          </div>
+        )}
+        <div className="composer">
+          <textarea
+            placeholder="Escribí como si fueras el cliente… (Enter para enviar)"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
+          />
+          <button className="primary" onClick={send} disabled={!text.trim()}>
+            Enviar
+          </button>
+        </div>
+      </div>
+
+      <div className="card" style={{ flex: "1 1 100%" }}>
+        <h3 style={{ marginTop: 0 }}>Entregas hacia n8n (esta sesión)</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Intentos</th>
+              <th>HTTP</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {deliveries.map((d) => (
+              <Fragment key={d.id}>
+                <tr>
+                  <td>{fmt(d.createdAt)}</td>
+                  <td>{d.attempt}</td>
+                  <td>{d.responseStatus ?? "—"}</td>
+                  <td>
+                    {d.succeeded ? (
+                      <span className="pill green">ok</span>
+                    ) : (
+                      <span className="pill red">pendiente</span>
+                    )}
+                  </td>
+                  <td>
+                    <button onClick={() => setExpanded(expanded === d.id ? null : d.id)}>
+                      {expanded === d.id ? "ocultar" : "ver payload"}
+                    </button>
+                  </td>
+                </tr>
+                {expanded === d.id && (
+                  <tr>
+                    <td colSpan={5}>
+                      <div className="row" style={{ alignItems: "flex-start", gap: 16 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <strong>Payload enviado</strong>
+                          <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, overflowX: "auto" }}>
+                            {JSON.stringify(d.payload, null, 2)}
+                          </pre>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <strong>Respuesta de n8n</strong>
+                          <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, overflowX: "auto" }}>
+                            {d.responseBody || "(sin respuesta todavía)"}
+                          </pre>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ))}
+            {deliveries.length === 0 && (
+              <tr>
+                <td colSpan={5} className="muted">
+                  Sin entregas todavía.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );

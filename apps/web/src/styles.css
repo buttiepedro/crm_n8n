@@ -291,6 +291,17 @@ tbody tr:hover { background: var(--bg-subtle); }
 .pill.red { background: var(--color-danger-bg); color: var(--color-danger); }
 .pill.yellow { background: var(--color-warning-bg); color: var(--color-warning-text); }
 
+.bot-warning {
+  margin: 0 12px 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
 /* ══ Hilo del chat ═════════════════════════════════════════════════════ */
 .thread { display: flex; flex-direction: column; background: var(--bg-app); overflow: hidden; }
 .thread .pane-head { border-bottom: 1px solid var(--border); }

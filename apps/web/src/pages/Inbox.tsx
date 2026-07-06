@@ -8,12 +8,13 @@ type Conv = {
   id: string;
   status: string;
   contact: { id: string; waId: string; profileName: string | null };
-  account: { id: string; name: string };
+  account: { id: string; name: string; isTest: boolean };
   assignedUserId: string | null;
   lastMessageAt: string | null;
   lastMessagePreview: string;
   unreadCount: number;
   windowOpen: boolean;
+  botPaused: boolean;
   leadId: string | null;
 };
 type Msg = {
@@ -179,6 +180,26 @@ export default function Inbox() {
     }
   };
 
+  const toggleBot = async () => {
+    if (!selected) return;
+    const next = !selected.botPaused;
+    if (next && !selected.windowOpen) {
+      const ok = window.confirm(
+        "Ventana de 24h cerrada: el cliente no escribió en las últimas 24h.\n" +
+          "Si silenciás el bot NO vas a poder responder manualmente (WhatsApp solo " +
+          "permite plantillas aprobadas fuera de la ventana) hasta que el cliente " +
+          "vuelva a escribir.\n¿Silenciar igual?"
+      );
+      if (!ok) return;
+    }
+    try {
+      await api.patch(`/conversations/${selected.id}`, { botPaused: next });
+      await loadConvs();
+    } catch (e) {
+      showError(e);
+    }
+  };
+
   const stages: StageT[] = pipelines.flatMap((p) => p.stages);
 
   return (
@@ -233,6 +254,7 @@ export default function Inbox() {
                     <span className={`pill ${c.windowOpen ? "green" : "red"}`}>
                       {c.windowOpen ? "24h abierta" : "24h cerrada"}
                     </span>
+                    {c.account.isTest && <span className="pill yellow">test</span>}
                     {c.leadId && <span className="pill yellow">lead</span>}
                   </div>
                 </div>
@@ -255,6 +277,20 @@ export default function Inbox() {
               <strong>{selected.contact.profileName || selected.contact.waId}</strong>
               <span className="muted">+{selected.contact.waId}</span>
               <span className="pill">{selected.status}</span>
+              {selected.account.isTest && <span className="pill yellow">test</span>}
+              {can("conversations:send") && (
+                <button
+                  onClick={toggleBot}
+                  className={selected.botPaused ? "primary" : ""}
+                  title={
+                    selected.botPaused
+                      ? "El bot no responde en esta conversación. Click para reactivarlo."
+                      : "El bot responde automáticamente. Click para silenciarlo y responder vos."
+                  }
+                >
+                  {selected.botPaused ? "🔇 Bot silenciado" : "🤖 Bot activo"}
+                </button>
+              )}
               <div className="spacer" style={{ flex: 1 }} />
               {can("conversations:assign") && (
                 <select value={selected.assignedUserId ?? ""} onChange={(e) => assign(e.target.value)}>
@@ -294,6 +330,12 @@ export default function Inbox() {
               ))}
               <div ref={bottomRef} />
             </div>
+            {selected.botPaused && !selected.windowOpen && (
+              <div className="bot-warning">
+                ⚠ Bot silenciado y ventana de 24h cerrada: no se puede responder manualmente
+                (solo plantillas vía n8n) hasta que el cliente vuelva a escribir.
+              </div>
+            )}
             <div className="composer">
               <textarea
                 placeholder={

@@ -22,6 +22,8 @@ from app.core.ids import uuid7
 from app.core.security import generate_api_key
 from app.db.models import (
     ApiKey,
+    Contact,
+    Conversation,
     EventLog,
     Message,
     User,
@@ -32,9 +34,11 @@ from app.db.models.enums import MessageStatus, UserRole, WaAccountStatus
 from app.db.session import get_db
 from app.infra.queue import TASK_DISPATCH_N8N, TASK_SEND_MESSAGE, get_queue
 from app.modules.accounts.service import (
+    TEST_ACCOUNT_PHONE_NUMBER_ID,
     decrypt_access_token,
     encrypt_access_token,
     encrypt_webhook_secret,
+    get_or_create_test_account,
     has_token,
 )
 from app.modules.audit.service import log_event
@@ -52,6 +56,7 @@ from app.modules.settings.service import (
     set_setting,
 )
 from app.modules.whatsapp.graph_client import GraphApiError, WhatsAppGraphClient
+from app.modules.whatsapp.ingest import ingest_meta_event
 from app.schemas.hooks import CamelModel
 
 log = structlog.get_logger()
@@ -103,7 +108,7 @@ async def update_platform(
                           updated_by=auth.user.id)
         changed.append("graph_api_version")
     if body.n8n_webhook_url is not None:
-        await set_setting(db, KEY_N8N_WEBHOOK_URL, body.n8n_webhook_url or None,
+        await set_setting(db, KEY_N8N_WEBHOOK_URL, body.n8n_webhook_url.strip() or None,
                           updated_by=auth.user.id)
         changed.append("n8n_webhook_url")
     if body.n8n_webhook_secret is not None:
@@ -146,8 +151,10 @@ def _account_row(a: WhatsAppAccount) -> dict:
 
 @router.get("/accounts")
 async def list_accounts(db: AsyncSession = Depends(get_db)) -> dict:
+    # La cuenta sintética del chat de prueba no se edita acá (ver tab "n8n")
     accounts = (await db.execute(
-        sa.select(WhatsAppAccount).order_by(WhatsAppAccount.created_at))).scalars().all()
+        sa.select(WhatsAppAccount).where(WhatsAppAccount.is_test.is_(False))
+        .order_by(WhatsAppAccount.created_at))).scalars().all()
     return {"items": [_account_row(a) for a in accounts]}
 
 
@@ -173,7 +180,9 @@ async def create_account(
         phone_number_id=body.phone_number_id,
         display_phone_number=body.display_phone_number,
         access_token_ciphertext=b"pendiente",
-        n8n_inbound_webhook_url=body.n8n_inbound_webhook_url,
+        n8n_inbound_webhook_url=(
+            body.n8n_inbound_webhook_url.strip() if body.n8n_inbound_webhook_url else None
+        ),
     )
     account.access_token_ciphertext = encrypt_access_token(settings, account.id,
                                                            body.access_token)
@@ -239,7 +248,7 @@ async def update_account(
     if body.clear_webhook_url:
         account.n8n_inbound_webhook_url = None; changed.append("webhook_url")
     elif body.n8n_inbound_webhook_url is not None:
-        account.n8n_inbound_webhook_url = body.n8n_inbound_webhook_url
+        account.n8n_inbound_webhook_url = body.n8n_inbound_webhook_url.strip()
         changed.append("webhook_url")
     if body.n8n_webhook_secret:
         account.n8n_webhook_secret_ciphertext = encrypt_webhook_secret(
@@ -380,6 +389,101 @@ async def test_account_webhook(
     await db.commit()
     await get_queue().enqueue(TASK_DISPATCH_N8N, {"delivery_id": str(delivery.id)})
     return {"deliveryId": str(delivery.id)}
+
+
+# ── Chat de prueba (canal "test", mismo webhook que WhatsApp real) ─────────
+#
+# Simula un mensaje entrante de WhatsApp llamando a ingest_meta_event() —
+# la MISMA función que procesa el webhook real de Meta — así el payload que
+# recibe n8n es idéntico al de producción. La cuenta usada (is_test=True)
+# nunca tiene token: el envío saliente (la respuesta de n8n) se simula en
+# vez de llamar a la Graph API (ver modules/messages/outbound.py).
+
+def _test_wa_id(session_id: str) -> str:
+    # Prefijo para no colisionar nunca con un wa_id real de WhatsApp
+    # (contacts.wa_id es único en toda la tabla).
+    return f"test:{session_id.strip()}"
+
+
+@router.get("/n8n-test/account")
+async def get_test_account_config(db: AsyncSession = Depends(get_db)) -> dict:
+    """Config de la cuenta sintética del chat de prueba: misma forma que
+    /config/accounts/{id} (webhook propio + secreto), editable con el PATCH
+    genérico de cuentas ya existente."""
+    account = await get_or_create_test_account(db)
+    await db.commit()
+    return _account_row(account)
+
+
+@router.get("/n8n-test/session/{session_id}")
+async def get_test_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    wa_id = _test_wa_id(session_id)
+    contact = (await db.execute(
+        sa.select(Contact).where(Contact.wa_id == wa_id)
+    )).scalar_one_or_none()
+    if contact is None:
+        return {"conversationId": None}
+    account = await get_or_create_test_account(db)
+    await db.commit()
+    conv = (await db.execute(
+        sa.select(Conversation).where(
+            Conversation.whatsapp_account_id == account.id,
+            Conversation.contact_id == contact.id,
+        )
+    )).scalar_one_or_none()
+    return {"conversationId": str(conv.id) if conv else None}
+
+
+class N8nTestMessageIn(CamelModel):
+    session_id: str = Field(min_length=1, max_length=120)
+    body: str = Field(min_length=1, max_length=4096)
+
+
+@router.post("/n8n-test/messages", status_code=202)
+async def send_test_message(
+    body: N8nTestMessageIn,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    await get_or_create_test_account(db)
+    await db.commit()
+
+    wa_id = _test_wa_id(body.session_id)
+    event = {
+        "object": "whatsapp_business_account",
+        "entry": [{
+            "id": "test",
+            "changes": [{
+                "field": "messages",
+                "value": {
+                    "messaging_product": "whatsapp",
+                    "metadata": {
+                        "display_phone_number": "test",
+                        "phone_number_id": TEST_ACCOUNT_PHONE_NUMBER_ID,
+                    },
+                    "contacts": [
+                        {"profile": {"name": f"Test: {body.session_id}"}, "wa_id": wa_id}
+                    ],
+                    "messages": [{
+                        "from": wa_id,
+                        "id": f"test.{uuid7()}",
+                        "timestamp": str(int(datetime.now(UTC).timestamp())),
+                        "type": "text",
+                        "text": {"body": body.body},
+                    }],
+                },
+            }],
+        }],
+    }
+    await ingest_meta_event(db, event)
+
+    conv = (await db.execute(
+        sa.select(Conversation).join(Contact, Conversation.contact_id == Contact.id)
+        .where(Contact.wa_id == wa_id)
+    )).scalar_one_or_none()
+    return {"conversationId": str(conv.id) if conv else None}
 
 
 # ── API keys para n8n ──────────────────────────────────────────────────────
@@ -542,6 +646,7 @@ async def list_event_logs(
 @router.get("/webhook-deliveries")
 async def list_deliveries(
     account_id: uuid.UUID | None = Query(None, alias="accountId"),
+    conversation_id: uuid.UUID | None = Query(None, alias="conversationId"),
     only_failed: bool = Query(False, alias="onlyFailed"),
     limit: int = Query(100, le=500),
     db: AsyncSession = Depends(get_db),
@@ -549,13 +654,18 @@ async def list_deliveries(
     stmt = sa.select(WebhookDelivery).order_by(WebhookDelivery.created_at.desc()).limit(limit)
     if account_id:
         stmt = stmt.where(WebhookDelivery.whatsapp_account_id == account_id)
+    if conversation_id:
+        stmt = stmt.where(
+            WebhookDelivery.payload["conversation"]["id"].astext == str(conversation_id)
+        )
     if only_failed:
         stmt = stmt.where(WebhookDelivery.succeeded.is_(False))
     rows = (await db.execute(stmt)).scalars().all()
     return {"items": [
         {"id": str(d.id), "accountId": str(d.whatsapp_account_id),
          "eventType": d.event_type, "targetUrl": d.target_url, "attempt": d.attempt,
-         "responseStatus": d.response_status, "succeeded": d.succeeded,
+         "responseStatus": d.response_status, "responseBody": d.response_body,
+         "succeeded": d.succeeded, "payload": d.payload,
          "createdAt": d.created_at.isoformat()}
         for d in rows
     ]}
