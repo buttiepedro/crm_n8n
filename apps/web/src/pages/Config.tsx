@@ -475,8 +475,30 @@ function N8nTestTab() {
   const [lastSentAt, setLastSentAt] = useState<number | null>(null);
   const [waitingUntil, setWaitingUntil] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [responseUrl, setResponseUrl] = useState(
+    () => `${window.location.origin}/api/v1/hooks/n8n/messages`
+  );
+  const [urlCopied, setUrlCopied] = useState(false);
+  const responseUrlRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const WAIT_MS = 5 * 60 * 1000;
+
+  const copyResponseUrl = async () => {
+    responseUrlRef.current?.select();
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(responseUrl);
+      ok = true;
+    } catch {
+      try {
+        ok = document.execCommand("copy");
+      } catch {
+        ok = false;
+      }
+    }
+    setUrlCopied(ok);
+    if (ok) setTimeout(() => setUrlCopied(false), 2000);
+  };
 
   // Cada mensaje entrante genera una fila en webhook_deliveries (mismo m.id
   // que payload.message.id): así sabemos si YA llegó a n8n o sigue reintentando.
@@ -612,6 +634,30 @@ function N8nTestTab() {
 
   return (
     <div className="row" style={{ alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+      <div className="card" style={{ flex: "1 1 320px", maxWidth: 420 }}>
+        <h3 style={{ marginTop: 0 }}>Webhook para que n8n te responda</h3>
+        <p className="muted">
+          En el nodo HTTP Request de n8n: método <code className="k">POST</code>, header{" "}
+          <code className="k">Authorization: Bearer &lt;api_key&gt;</code> y body{" "}
+          <code className="k">{'{ "conversationId": "…", "message": { "type": "text", "body": "…" } }'}</code>.
+          El <code className="k">conversationId</code> viene en el payload que ya recibiste (
+          <code className="k">conversation.id</code>).
+        </p>
+        <label>
+          URL (asumida desde este navegador — corregila si tu API vive en otro dominio/puerto)
+          <div className="row">
+            <input
+              ref={responseUrlRef}
+              value={responseUrl}
+              onChange={(e) => setResponseUrl(e.target.value)}
+              onFocus={(e) => e.target.select()}
+              style={{ flex: 1, fontFamily: "monospace", fontSize: 13 }}
+            />
+            <button onClick={copyResponseUrl}>{urlCopied ? "✓ Copiado" : "Copiar"}</button>
+          </div>
+        </label>
+      </div>
+
       <div className="card" style={{ flex: "1 1 320px", maxWidth: 420 }}>
         <h3 style={{ marginTop: 0 }}>Webhook del canal de prueba</h3>
         <p className="muted">
