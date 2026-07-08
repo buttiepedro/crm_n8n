@@ -1,18 +1,28 @@
-"""Los dos webhooks entrantes para n8n.
+"""Los webhooks/endpoints entrantes para n8n.
 
 1. POST /hooks/n8n/messages — respuestas de n8n que se envían a WhatsApp.
 2. POST /hooks/n8n/leads — upsert de leads + notas internas desde n8n.
+3. GET /hooks/n8n/attachments/{id}/download — binario de un adjunto (para
+   audios sin transcripción, o cualquier media que n8n necesite bajar).
 
 Contratos completos en roadmap/next_steps_webhooks_n8n.md y en /api/docs.
 """
 
+import uuid
+
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import ApiKey
+from app.db.models import ApiKey, Attachment
 from app.db.models.enums import MessageOrigin
 from app.db.session import get_db
-from app.modules.hooks.auth import SCOPE_HOOKS_LEADS, SCOPE_HOOKS_MESSAGES, require_api_key
+from app.modules.conversations.service import build_attachment_response
+from app.modules.hooks.auth import (
+    SCOPE_HOOKS_LEADS,
+    SCOPE_HOOKS_MEDIA,
+    SCOPE_HOOKS_MESSAGES,
+    require_api_key,
+)
 from app.modules.leads.service import upsert_lead_from_webhook
 from app.modules.messages.outbound import queue_outbound_message
 from app.schemas.hooks import N8nLeadIn, N8nLeadOut, N8nMessageIn, N8nMessageOut
@@ -47,3 +57,17 @@ async def n8n_upsert_lead(
     result = await upsert_lead_from_webhook(session, body, api_key_id=api_key.id)
     response.status_code = 201 if result.created else 200
     return result
+
+
+@router.get("/attachments/{attachment_id}/download")
+async def n8n_download_attachment(
+    attachment_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    api_key: ApiKey = require_api_key(SCOPE_HOOKS_MEDIA),
+) -> Response:
+    """Binario del adjunto (mismo archivo que sirve el panel CRM). Pensado
+    para el audio cuando no hay transcripción (attachments[].transcript es
+    null en el payload de message.received) — no hace falta para el caso
+    normal, que ya viene con el texto resuelto."""
+    att = await session.get(Attachment, attachment_id)
+    return await build_attachment_response(att)

@@ -163,6 +163,7 @@ function PlatformTab() {
   const [graphVersion, setGraphVersion] = useState("");
   const [n8nUrl, setN8nUrl] = useState("");
   const [n8nSecret, setN8nSecret] = useState("");
+  const [openaiKey, setOpenaiKey] = useState("");
   const [reveal, setReveal] = useState<{ label: string; value: string; hint?: string } | null>(null);
 
   const load = async () => {
@@ -184,9 +185,11 @@ function PlatformTab() {
         graphApiVersion: graphVersion || undefined,
         n8nWebhookUrl: n8nUrl !== (data.n8nWebhookUrl ?? "") ? n8nUrl : undefined,
         n8nWebhookSecret: n8nSecret || undefined,
+        openaiApiKey: openaiKey || undefined,
       });
       setAppSecret("");
       setN8nSecret("");
+      setOpenaiKey("");
       await load();
       window.alert("Guardado");
     } catch (e) {
@@ -288,6 +291,25 @@ function PlatformTab() {
           </div>
         </label>
       </div>
+
+      <h3>Transcripción de audio (OpenAI)</h3>
+      <p className="muted">
+        Key usada para transcribir los audios entrantes con{" "}
+        <code className="k">gpt-4o-transcribe</code> apenas se bajan de WhatsApp. Sin key: el
+        audio se guarda igual pero sin texto (el chat muestra "transcribiendo…" para siempre).
+      </p>
+      <div className="form-grid">
+        <label>
+          OpenAI API Key {data.openaiApiKeySet ? "✅ configurada" : "⚠️ falta"}
+          <input
+            type="password"
+            placeholder={data.openaiApiKeySet ? "(reemplazar…)" : "sk-…"}
+            value={openaiKey}
+            onChange={(e) => setOpenaiKey(e.target.value)}
+          />
+        </label>
+      </div>
+
       <button className="primary" onClick={save}>
         Guardar
       </button>
@@ -878,6 +900,29 @@ function KeysTab() {
       <div className="row" style={{ marginBottom: 14 }}>
         <input placeholder="Nombre (ej: n8n-produccion)" value={name} onChange={(e) => setName(e.target.value)} />
         <button className="primary" onClick={create} disabled={!name.trim()}>Crear API key</button>
+      </div>
+      <div className="card" style={{ marginBottom: 14, maxWidth: 640 }}>
+        <h3 style={{ marginTop: 0 }}>Bajar el audio crudo desde n8n</h3>
+        <p className="muted">
+          El payload de <code className="k">message.received</code> ya trae{" "}
+          <code className="k">attachments[0].transcript</code> con el texto transcripto — para el
+          caso normal no hace falta pedir nada más. Esto es solo para cuando{" "}
+          <code className="k">transcript</code> viene <code className="k">null</code> (falló la
+          transcripción, ej. el audio no llegó en formato soportado) y necesitás el archivo
+          original igual.
+        </p>
+        <p className="muted">
+          <code className="k">GET /api/v1/hooks/n8n/attachments/&#123;attachmentId&#125;/download</code>
+          {" "}con header <code className="k">Authorization: Bearer &lt;api_key&gt;</code> — la
+          misma API key que ya usás para <code className="k">/hooks/n8n/messages</code>, no hace
+          falta ningún login aparte. <code className="k">attachmentId</code> viene en{" "}
+          <code className="k">attachments[0].id</code> del payload.
+        </p>
+        <p className="muted">
+          Requiere el scope <code className="k">hooks:media</code>: las keys nuevas ya lo traen
+          por default. Si tu key es de antes de este cambio, no lo tiene — creá una nueva (no hay
+          forma de agregarle scopes a una existente).
+        </p>
       </div>
       <table>
         <thead><tr><th>Nombre</th><th>Prefijo</th><th>Scopes</th><th>Último uso</th><th>Estado</th><th></th></tr></thead>

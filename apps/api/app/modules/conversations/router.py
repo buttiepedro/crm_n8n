@@ -26,10 +26,10 @@ from app.db.models import (
 )
 from app.db.models.enums import ConversationStatus, MessageOrigin, NoteAuthorSource
 from app.db.session import get_db
-from app.infra.storage import get_storage
 from app.modules.audit.service import log_event
 from app.modules.auth import permissions as perms
 from app.modules.auth.deps import AuthContext, get_auth, require_permissions
+from app.modules.conversations.service import build_attachment_response
 from app.modules.messages.outbound import is_window_open, queue_outbound_message
 from app.schemas.hooks import CamelModel, OutboundMessageContent
 
@@ -353,16 +353,7 @@ async def download_attachment(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     att = await db.get(Attachment, attachment_id)
-    if att is None or not att.gcs_path:
-        raise NotFoundError("Adjunto no disponible")
-    data = await get_storage().load(att.gcs_path)
-    # Tipos peligrosos jamás inline (XSS via HTML/SVG)
-    disposition = "attachment" if att.mime_type in {"text/html", "image/svg+xml"} else "inline"
-    filename = (att.file_name or str(att.id)).replace('"', "")
-    return Response(
-        content=data, media_type=att.mime_type,
-        headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
-    )
+    return await build_attachment_response(att)
 
 
 # ── Usuarios (para selects de asignación) ──────────────────────────────────

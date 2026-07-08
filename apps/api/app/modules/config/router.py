@@ -509,7 +509,9 @@ async def list_api_keys(db: AsyncSession = Depends(get_db)) -> dict:
 
 class ApiKeyIn(CamelModel):
     name: str
-    scopes: list[str] = Field(default_factory=lambda: ["hooks:messages", "hooks:leads"])
+    scopes: list[str] = Field(
+        default_factory=lambda: ["hooks:messages", "hooks:leads", "hooks:media"]
+    )
 
 
 @router.post("/api-keys", status_code=201)

@@ -17,6 +17,7 @@ from app.db.session import get_db
 
 SCOPE_HOOKS_MESSAGES = "hooks:messages"
 SCOPE_HOOKS_LEADS = "hooks:leads"
+SCOPE_HOOKS_MEDIA = "hooks:media"
 
 
 def require_api_key(*required_scopes: str):
