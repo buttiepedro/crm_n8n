@@ -57,6 +57,7 @@ async def queue_outbound_message(
     content: OutboundMessageContent,
     origin: MessageOrigin,
     sent_by_user_id: uuid.UUID | None = None,
+    reply_to_message_id: uuid.UUID | None = None,
 ) -> Message:
     conversation, account = await _resolve_target(session, conversation_id, account_id, to_wa_id)
 
@@ -83,6 +84,7 @@ async def queue_outbound_message(
         body=content.body,
         status=MessageStatus.queued,
         raw_payload={"request": content.model_dump(mode="json", by_alias=True)},
+        reply_to_message_id=reply_to_message_id,
     )
     session.add(message)
     conversation.last_message_at = datetime.now(UTC)
@@ -151,7 +153,13 @@ async def handle_send_message(payload: dict) -> None:
             phone_number_id=account.phone_number_id,
             api_version=await get_setting_cached(KEY_GRAPH_VERSION, "v21.0"),
         )
-        graph_payload = build_graph_payload(message, contact.wa_id)
+
+        reply_to_wamid = None
+        if message.reply_to_message_id is not None:
+            quoted = await session.get(Message, message.reply_to_message_id)
+            reply_to_wamid = quoted.wamid if quoted else None
+
+        graph_payload = build_graph_payload(message, contact.wa_id, reply_to_wamid)
 
         try:
             wamid = await client.send_message(graph_payload)
@@ -171,11 +179,15 @@ async def handle_send_message(payload: dict) -> None:
         log.info("outbound_sent", message_id=str(message.id), wamid=wamid)
 
 
-def build_graph_payload(message: Message, to_wa_id: str) -> dict:
+def build_graph_payload(
+    message: Message, to_wa_id: str, reply_to_wamid: str | None = None
+) -> dict:
     """Construye el payload de la Graph API desde el request original."""
     request: dict = (message.raw_payload or {}).get("request", {})
     msg_type = message.type.value
     payload: dict = {"messaging_product": "whatsapp", "to": to_wa_id, "type": msg_type}
+    if reply_to_wamid:
+        payload["context"] = {"message_id": reply_to_wamid}
 
     if msg_type == "text":
         payload["text"] = {"body": message.body, "preview_url": True}

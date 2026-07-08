@@ -29,6 +29,7 @@ from app.db.session import get_sessionmaker
 from app.infra.queue import TASK_DISPATCH_N8N, TASK_DOWNLOAD_MEDIA, TASK_MARK_READ, get_queue
 from app.modules.accounts.service import TOKEN_PENDING, get_account_by_phone_number_id
 from app.modules.conversations.service import get_or_create_contact, get_or_create_conversation
+from app.modules.messages.outbound import queue_outbound_message
 from app.modules.n8n_dispatch.service import create_message_received_delivery
 from app.modules.whatsapp.media import download_audio_inline
 from app.modules.whatsapp.parser import (
@@ -36,6 +37,7 @@ from app.modules.whatsapp.parser import (
     ParsedStatusEvent,
     parse_meta_event,
 )
+from app.schemas.hooks import OutboundMessageContent
 
 log = structlog.get_logger()
 
@@ -166,6 +168,33 @@ async def _ingest_message(session: AsyncSession, parsed: ParsedInboundMessage) -
         # Doble check azul + indicador "escribiendo..." solo en texto/audio
         # (requiere token propio)
         await queue.enqueue(TASK_MARK_READ, {"message_id": str(message_id)})
+
+    if (
+        attachment is not None
+        and parsed.type == MessageType.audio
+        and attachment.transcript
+        and not conversation.bot_paused
+    ):
+        # Ack automático: confirma qué se entendió y pide no mandar más
+        # mensajes mientras se genera la respuesta (evita que el bot/agente
+        # conteste sobre un contexto viejo si el cliente sigue mandando audios).
+        # Best-effort: cuenta pausada / ventana cerrada no debe tumbar la ingesta.
+        try:
+            await queue_outbound_message(
+                session,
+                conversation_id=conversation.id,
+                content=OutboundMessageContent(
+                    type="text",
+                    body=(
+                        f'De tu audio entendí: "{attachment.transcript}"\n\n'
+                        "Por favor no envíes más mensajes mientras genero una respuesta"
+                    ),
+                ),
+                origin=MessageOrigin.system,
+                reply_to_message_id=message_id,
+            )
+        except Exception:
+            log.warning("audio_ack_failed", message_id=str(message_id))
 
 
 def _touch_conversation_inbound(conversation: Conversation, occurred_at: datetime) -> None:

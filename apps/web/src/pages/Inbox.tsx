@@ -359,7 +359,8 @@ export default function Inbox() {
                     )
                   )}
                   <div className="meta">
-                    {m.direction === "outbound" && `${m.origin === "n8n" ? "n8n" : "agente"} · ${m.status} · `}
+                    {m.direction === "outbound" &&
+                      `${m.origin === "n8n" ? "n8n" : m.origin === "system" ? "auto" : "agente"} · ${m.status} · `}
                     {fmt(m.createdAt)}
                   </div>
                 </div>

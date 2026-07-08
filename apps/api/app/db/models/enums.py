@@ -51,6 +51,7 @@ class MessageOrigin(str, enum.Enum):
     whatsapp = "whatsapp"
     crm_user = "crm_user"
     n8n = "n8n"
+    system = "system"  # auto-respuestas del backend (ej. ack de audio transcripto)
 
 
 class MessageType(str, enum.Enum):
