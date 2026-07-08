@@ -50,6 +50,7 @@ from app.modules.settings.service import (
     KEY_GRAPH_VERSION,
     KEY_N8N_WEBHOOK_SECRET,
     KEY_N8N_WEBHOOK_URL,
+    KEY_OPENAI_API_KEY,
     KEY_WA_APP_SECRET,
     KEY_WA_VERIFY_TOKEN,
     get_setting,
@@ -78,6 +79,7 @@ async def get_platform(db: AsyncSession = Depends(get_db)) -> dict:
         # Webhook GLOBAL hacia n8n (todas las cuentas; una cuenta puede pisarlo)
         "n8nWebhookUrl": await get_setting(db, KEY_N8N_WEBHOOK_URL),
         "n8nWebhookSecretSet": bool(await get_setting(db, KEY_N8N_WEBHOOK_SECRET)),
+        "openaiApiKeySet": bool(await get_setting(db, KEY_OPENAI_API_KEY)),
     }
 
 
@@ -88,6 +90,7 @@ class PlatformIn(CamelModel):
     # alias explícito: to_camel("n8n_…") generaría "n8N…" (el 8 rompe el camelCase)
     n8n_webhook_url: str | None = Field(None, alias="n8nWebhookUrl")  # "" → quitar
     n8n_webhook_secret: str | None = Field(None, alias="n8nWebhookSecret")
+    openai_api_key: str | None = Field(None, alias="openaiApiKey")
 
 
 @router.put("/platform")
@@ -115,6 +118,10 @@ async def update_platform(
         await set_setting(db, KEY_N8N_WEBHOOK_SECRET, body.n8n_webhook_secret or None,
                           updated_by=auth.user.id)
         changed.append("n8n_webhook_secret")
+    if body.openai_api_key is not None:
+        await set_setting(db, KEY_OPENAI_API_KEY, body.openai_api_key or None,
+                          updated_by=auth.user.id)
+        changed.append("openai_api_key")
     await log_event(db, actor_type="user", actor_id=auth.user.id,
                     action="platform.settings_updated", metadata={"changed": changed})
     await db.commit()

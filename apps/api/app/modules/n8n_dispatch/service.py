@@ -123,6 +123,9 @@ async def create_message_received_delivery(
                         # TODO(P5): URL firmada de GCS (15 min). Con storage local
                         # n8n puede pedir el binario a la API cuando exista el endpoint.
                         "storagePath": attachment.gcs_path,
+                        # Solo audio: texto ya transcripto (gpt-4o-transcribe), listo
+                        # para usar sin que n8n tenga que pedir/transcribir el binario.
+                        "transcript": attachment.transcript,
                     }
                 ]
                 if attachment

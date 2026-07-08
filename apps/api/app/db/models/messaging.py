@@ -136,3 +136,4 @@ class Attachment(UUIDPkMixin, CreatedAtMixin, Base):
         nullable=False,
         default=AttachmentDownloadStatus.pending,
     )
+    transcript: Mapped[str | None] = mapped_column(sa.Text)  # solo audio (OpenAI)

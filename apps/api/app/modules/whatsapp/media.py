@@ -17,6 +17,7 @@ from app.infra.storage import get_storage
 from app.modules.accounts.service import decrypt_access_token, get_account
 from app.modules.settings.service import KEY_GRAPH_VERSION, get_setting_cached
 from app.modules.whatsapp.graph_client import GraphApiError, WhatsAppGraphClient
+from app.modules.whatsapp.transcription import transcribe_audio
 
 log = structlog.get_logger()
 
@@ -70,6 +71,11 @@ async def _perform_download(attachment: Attachment, message: Message, account, s
     attachment.sha256 = hashlib.sha256(data).hexdigest()
     attachment.download_status = AttachmentDownloadStatus.done
     log.info("media_downloaded", attachment_id=str(attachment.id), size=len(data))
+
+    if attachment.mime_type.startswith("audio/"):
+        attachment.transcript = await transcribe_audio(
+            data, attachment.mime_type, attachment.file_name
+        )
 
 
 async def handle_download_media(payload: dict) -> None:
