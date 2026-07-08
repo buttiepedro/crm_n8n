@@ -22,6 +22,7 @@ from app.db.models.enums import (
     MessageDirection,
     MessageOrigin,
     MessageStatus,
+    MessageType,
 )
 from app.db.models import WhatsAppAccount
 from app.db.session import get_sessionmaker
@@ -29,6 +30,7 @@ from app.infra.queue import TASK_DISPATCH_N8N, TASK_DOWNLOAD_MEDIA, get_queue
 from app.modules.accounts.service import TOKEN_PENDING, get_account_by_phone_number_id
 from app.modules.conversations.service import get_or_create_contact, get_or_create_conversation
 from app.modules.n8n_dispatch.service import create_message_received_delivery
+from app.modules.whatsapp.media import download_audio_inline
 from app.modules.whatsapp.parser import (
     ParsedInboundMessage,
     ParsedStatusEvent,
@@ -112,8 +114,20 @@ async def _ingest_message(session: AsyncSession, parsed: ParsedInboundMessage) -
             download_status=AttachmentDownloadStatus.pending,
         )
         session.add(attachment)
+        await session.flush()
 
     message = await session.get(Message, message_id)
+
+    # Audio: bajarlo ANTES de armar el webhook a n8n. El payload se congela acá
+    # (delivery.payload es JSON fijo) — si no está bajado ya, storagePath queda
+    # null para siempre y n8n no tiene forma de pedirlo después.
+    if (
+        attachment is not None
+        and parsed.type == MessageType.audio
+        and account.access_token_ciphertext != TOKEN_PENDING
+    ):
+        await download_audio_inline(attachment, message, account, get_settings())
+
     delivery = await create_message_received_delivery(
         session,
         settings=get_settings(),
@@ -135,8 +149,13 @@ async def _ingest_message(session: AsyncSession, parsed: ParsedInboundMessage) -
     )
 
     queue = get_queue()
-    if attachment is not None and account.access_token_ciphertext != TOKEN_PENDING:
-        # Descargar media requiere el token de la cuenta
+    if (
+        attachment is not None
+        and attachment.download_status != AttachmentDownloadStatus.done
+        and account.access_token_ciphertext != TOKEN_PENDING
+    ):
+        # Descargar media requiere el token de la cuenta. Si ya se bajó en
+        # línea (audio) no hace falta reencolar.
         await queue.enqueue(TASK_DOWNLOAD_MEDIA, {"attachment_id": str(attachment.id)})
     if delivery is not None:
         await queue.enqueue(TASK_DISPATCH_N8N, {"delivery_id": str(delivery.id)})
