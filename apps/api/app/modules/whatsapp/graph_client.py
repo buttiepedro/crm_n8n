@@ -60,6 +60,20 @@ class WhatsAppGraphClient:
         data = resp.json()
         return data["messages"][0]["id"]
 
+    async def mark_read_with_typing(self, wamid: str) -> None:
+        """Marca el mensaje como leído (doble check azul) y muestra el
+        indicador de 'escribiendo...' hasta ~25s o hasta que se responda."""
+        await self._request(
+            "POST",
+            f"{self._base}/{self._phone_number_id}/messages",
+            json={
+                "messaging_product": "whatsapp",
+                "status": "read",
+                "message_id": wamid,
+                "typing_indicator": {"type": "text"},
+            },
+        )
+
     async def get_media_info(self, media_id: str) -> dict:
         """Devuelve {url, mime_type, file_size, ...}. La URL expira en ~5 min."""
         resp = await self._request("GET", f"{self._base}/{media_id}")

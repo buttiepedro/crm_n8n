@@ -26,7 +26,7 @@ from app.db.models.enums import (
 )
 from app.db.models import WhatsAppAccount
 from app.db.session import get_sessionmaker
-from app.infra.queue import TASK_DISPATCH_N8N, TASK_DOWNLOAD_MEDIA, get_queue
+from app.infra.queue import TASK_DISPATCH_N8N, TASK_DOWNLOAD_MEDIA, TASK_MARK_READ, get_queue
 from app.modules.accounts.service import TOKEN_PENDING, get_account_by_phone_number_id
 from app.modules.conversations.service import get_or_create_contact, get_or_create_conversation
 from app.modules.n8n_dispatch.service import create_message_received_delivery
@@ -159,6 +159,13 @@ async def _ingest_message(session: AsyncSession, parsed: ParsedInboundMessage) -
         await queue.enqueue(TASK_DOWNLOAD_MEDIA, {"attachment_id": str(attachment.id)})
     if delivery is not None:
         await queue.enqueue(TASK_DISPATCH_N8N, {"delivery_id": str(delivery.id)})
+    if (
+        parsed.type in (MessageType.text, MessageType.audio)
+        and account.access_token_ciphertext != TOKEN_PENDING
+    ):
+        # Doble check azul + indicador "escribiendo..." solo en texto/audio
+        # (requiere token propio)
+        await queue.enqueue(TASK_MARK_READ, {"message_id": str(message_id)})
 
 
 def _touch_conversation_inbound(conversation: Conversation, occurred_at: datetime) -> None:

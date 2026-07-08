@@ -28,6 +28,7 @@ TASK_INGEST_META = "ingest_meta_event"
 TASK_SEND_MESSAGE = "send_whatsapp_message"
 TASK_DISPATCH_N8N = "dispatch_n8n_event"
 TASK_DOWNLOAD_MEDIA = "download_media"
+TASK_MARK_READ = "mark_message_read"
 
 
 class TaskQueue(ABC):
