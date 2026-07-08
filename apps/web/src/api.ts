@@ -1,4 +1,5 @@
 /** Cliente API: mismo origen (nginx proxea /api → backend). */
+import { alertDialog } from "./ui/dialogs";
 
 export class ApiError extends Error {
   code: string;
@@ -41,5 +42,5 @@ export const api = {
 
 export function showError(e: unknown) {
   const msg = e instanceof ApiError ? `${e.message} (${e.code})` : String(e);
-  window.alert(msg);
+  alertDialog({ message: msg, danger: true });
 }

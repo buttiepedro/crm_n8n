@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, showError } from "../api";
 import { useAuth } from "../auth";
+import { Select } from "../ui/Select";
+import { Switch } from "../ui/Switch";
+import { confirmDialog, promptDialog } from "../ui/dialogs";
+import { AudioPlayer } from "../ui/AudioPlayer";
 
 type Conv = {
   id: string;
@@ -147,7 +151,7 @@ export default function Inbox() {
   };
 
   const editNote = async (n: NoteT) => {
-    const body = window.prompt("Editar nota:", n.body);
+    const body = await promptDialog({ title: "Editar nota", message: "Contenido:", defaultValue: n.body });
     if (body === null || body.trim() === "") return;
     try {
       await api.patch(`/notes/${n.id}`, { body: body.trim() });
@@ -191,12 +195,16 @@ export default function Inbox() {
     if (!selected) return;
     const next = !selected.botPaused;
     if (next && !selected.windowOpen) {
-      const ok = window.confirm(
-        "Ventana de 24h cerrada: el cliente no escribió en las últimas 24h.\n" +
+      const ok = await confirmDialog({
+        title: "Silenciar bot",
+        message:
+          "Ventana de 24h cerrada: el cliente no escribió en las últimas 24h.\n" +
           "Si silenciás el bot NO vas a poder responder manualmente (WhatsApp solo " +
           "permite plantillas aprobadas fuera de la ventana) hasta que el cliente " +
-          "vuelva a escribir.\n¿Silenciar igual?"
-      );
+          "vuelva a escribir.\n¿Silenciar igual?",
+        confirmLabel: "Silenciar igual",
+        danger: true,
+      });
       if (!ok) return;
     }
     try {
@@ -220,23 +228,22 @@ export default function Inbox() {
             value={filters.q}
             onChange={(e) => setFilters({ ...filters, q: e.target.value })}
           />
-          <select
+          <Select
+            style={{ width: 130 }}
             value={filters.status}
-            onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-          >
-            <option value="">Todas</option>
-            <option value="open">Abiertas</option>
-            <option value="pending">Pendientes</option>
-            <option value="closed">Cerradas</option>
-          </select>
-          <label style={{ fontSize: 12 }}>
-            <input
-              type="checkbox"
-              checked={filters.unread}
-              onChange={(e) => setFilters({ ...filters, unread: e.target.checked })}
-            />{" "}
-            No leídas
-          </label>
+            onChange={(v) => setFilters({ ...filters, status: v })}
+            options={[
+              { value: "", label: "Todas" },
+              { value: "open", label: "Abiertas" },
+              { value: "pending", label: "Pendientes" },
+              { value: "closed", label: "Cerradas" },
+            ]}
+          />
+          <Switch
+            checked={filters.unread}
+            onChange={(v) => setFilters({ ...filters, unread: v })}
+            label="No leídas"
+          />
         </div>
         <div className="pane-body">
           {convs.map((c) => {
@@ -300,14 +307,15 @@ export default function Inbox() {
               )}
               <div className="spacer" style={{ flex: 1 }} />
               {can("conversations:assign") && (
-                <select value={selected.assignedUserId ?? ""} onChange={(e) => assign(e.target.value)}>
-                  <option value="">Sin asignar</option>
-                  {users.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
-                  ))}
-                </select>
+                <Select
+                  style={{ width: 160 }}
+                  value={selected.assignedUserId ?? ""}
+                  onChange={assign}
+                  options={[
+                    { value: "", label: "Sin asignar" },
+                    ...users.map((u) => ({ value: u.id, label: u.name })),
+                  ]}
+                />
               )}
               {can("conversations:close") && selected.status !== "closed" && (
                 <button onClick={() => setStatus("closed")}>Cerrar</button>
@@ -327,12 +335,7 @@ export default function Inbox() {
                         {a.downloadStatus === "done" && (
                           <>
                             {expandedAudio.has(a.id) ? (
-                              <audio
-                                controls
-                                autoPlay
-                                style={{ marginTop: 4, maxWidth: 240 }}
-                                src={`/api/v1/attachments/${a.id}/download`}
-                              />
+                              <AudioPlayer autoPlay src={`/api/v1/attachments/${a.id}/download`} />
                             ) : (
                               <button
                                 style={{ marginTop: 4, fontSize: "0.85em", padding: "2px 8px" }}
@@ -480,13 +483,12 @@ function LeadBox({ leadId, stages, onChanged }: { leadId: string; stages: StageT
         </div>
       )}
       {can("leads:move_stage") && (
-        <select style={{ width: "100%", marginTop: 8 }} value={lead.stageId} onChange={(e) => move(e.target.value)}>
-          {stages.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
+        <Select
+          style={{ width: "100%", marginTop: 8 }}
+          value={lead.stageId}
+          onChange={move}
+          options={stages.map((s) => ({ value: s.id, label: s.name }))}
+        />
       )}
     </div>
   );

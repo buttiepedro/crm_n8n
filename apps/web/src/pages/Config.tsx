@@ -4,6 +4,9 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api, showError } from "../api";
 import { useAuth } from "../auth";
+import { Select } from "../ui/Select";
+import { Switch } from "../ui/Switch";
+import { alertDialog, confirmDialog, promptDialog } from "../ui/dialogs";
 
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : "—");
 
@@ -191,7 +194,7 @@ function PlatformTab() {
       setN8nSecret("");
       setOpenaiKey("");
       await load();
-      window.alert("Guardado");
+      await alertDialog("Guardado");
     } catch (e) {
       showError(e);
     }
@@ -454,17 +457,17 @@ function AccountCard({ account, onChanged, onSecret }: {
         <button className="primary" onClick={save}>Guardar</button>
         <button onClick={act(async () => {
           const r = await api.post<any>(`/config/accounts/${account.id}/test`);
-          window.alert(r.ok ? `Conexión OK: ${r.phone ?? ""}` : `Error: ${JSON.stringify(r.detail)}`);
+          await alertDialog(r.ok ? `Conexión OK: ${r.phone ?? ""}` : `Error: ${JSON.stringify(r.detail)}`);
         })}>Probar conexión</button>
         <button onClick={act(async () => {
           const r = await api.post<any>(`/config/accounts/${account.id}/subscribe`);
-          window.alert(r.ok
+          await alertDialog(r.ok
             ? `WABA suscripta ✅ — apps: ${JSON.stringify(r.subscribedApps)}`
             : `Error ${r.status}: ${JSON.stringify(r.detail)}`);
         })}>Suscribir WABA</button>
         <button onClick={act(async () => {
           await api.post(`/config/accounts/${account.id}/test-webhook`);
-          window.alert("Evento de prueba encolado hacia n8n (ver Logs → Entregas)");
+          await alertDialog("Evento de prueba encolado hacia n8n (ver Logs → Entregas)");
         })}>Test n8n</button>
         <button onClick={act(() =>
           api.patch(`/config/accounts/${account.id}`,
@@ -472,7 +475,13 @@ function AccountCard({ account, onChanged, onSecret }: {
           {account.status === "paused" ? "Activar" : "Pausar"}
         </button>
         <button className="danger" onClick={act(async () => {
-          if (!window.confirm(`¿Borrar la cuenta "${account.name}"? Solo posible sin historial.`)) return;
+          const ok = await confirmDialog({
+            title: "Eliminar cuenta",
+            message: `¿Borrar la cuenta "${account.name}"? Solo posible sin historial.`,
+            confirmLabel: "Eliminar",
+            danger: true,
+          });
+          if (!ok) return;
           await api.del(`/config/accounts/${account.id}`);
         })}>Eliminar</button>
       </div>
@@ -648,7 +657,7 @@ function N8nTestTab() {
       await api.patch(`/config/accounts/${account.id}`, body);
       setWebhookSecret("");
       loadAccount();
-      window.alert("Guardado");
+      await alertDialog("Guardado");
     } catch (e) {
       showError(e);
     }
@@ -936,7 +945,13 @@ function KeysTab() {
               <td>{k.isActive ? <span className="pill green">activa</span> : <span className="pill red">revocada</span>}</td>
               <td>{k.isActive && (
                 <button className="danger" onClick={async () => {
-                  if (!window.confirm(`¿Revocar "${k.name}"? n8n dejará de autenticar.`)) return;
+                  const ok = await confirmDialog({
+                    title: "Revocar API key",
+                    message: `¿Revocar "${k.name}"? n8n dejará de autenticar.`,
+                    confirmLabel: "Revocar",
+                    danger: true,
+                  });
+                  if (!ok) return;
                   try { await api.post(`/config/api-keys/${k.id}/revoke`); await load(); } catch (e) { showError(e); }
                 }}>Revocar</button>
               )}</td>
@@ -986,11 +1001,15 @@ function UsersTab() {
           <label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
           <label>Nombre<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
           <label>Rol
-            <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-              <option value="agent">Agente</option>
-              <option value="supervisor">Supervisor</option>
-              <option value="admin">Admin</option>
-            </select>
+            <Select
+              value={form.role}
+              onChange={(v) => setForm({ ...form, role: v })}
+              options={[
+                { value: "agent", label: "Agente" },
+                { value: "supervisor", label: "Supervisor" },
+                { value: "admin", label: "Admin" },
+              ]}
+            />
           </label>
           <label>Contraseña inicial (mín. 10)<input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
         </div>
@@ -1005,11 +1024,15 @@ function UsersTab() {
             <tr key={u.id}>
               <td>{u.name}<br /><span className="muted">{u.email}</span></td>
               <td>
-                <select value={u.role} onChange={(e) => patch(u.id, { role: e.target.value })()}>
-                  <option value="agent">agente</option>
-                  <option value="supervisor">supervisor</option>
-                  <option value="admin">admin</option>
-                </select>
+                <Select
+                  value={u.role}
+                  onChange={(v) => patch(u.id, { role: v })()}
+                  options={[
+                    { value: "agent", label: "agente" },
+                    { value: "supervisor", label: "supervisor" },
+                    { value: "admin", label: "admin" },
+                  ]}
+                />
               </td>
               <td>{fmt(u.lastLoginAt)}</td>
               <td>{u.isActive ? <span className="pill green">activo</span> : <span className="pill red">inactivo</span>}</td>
@@ -1017,7 +1040,11 @@ function UsersTab() {
                 <div className="row" style={{ gap: 4 }}>
                   <button onClick={patch(u.id, { isActive: !u.isActive })}>{u.isActive ? "Desactivar" : "Activar"}</button>
                   <button onClick={async () => {
-                    const pw = window.prompt("Nueva contraseña (mín. 10; cierra sus sesiones):");
+                    const pw = await promptDialog({
+                      title: "Restablecer contraseña",
+                      message: "Nueva contraseña (mín. 10; cierra sus sesiones):",
+                      password: true,
+                    });
                     if (pw) await patch(u.id, { password: pw })();
                   }}>Reset clave</button>
                 </div>
@@ -1088,9 +1115,9 @@ function Deliveries() {
   }, [load]);
   return (
     <>
-      <label style={{ fontSize: 13, display: "block", marginBottom: 10 }}>
-        <input type="checkbox" checked={onlyFailed} onChange={(e) => setOnlyFailed(e.target.checked)} /> Solo fallidas
-      </label>
+      <div style={{ marginBottom: 10 }}>
+        <Switch checked={onlyFailed} onChange={setOnlyFailed} label="Solo fallidas" />
+      </div>
       <table>
         <thead><tr><th>Fecha</th><th>Evento</th><th>Destino</th><th>Intentos</th><th>HTTP</th><th>Estado</th><th></th></tr></thead>
         <tbody>
@@ -1104,7 +1131,7 @@ function Deliveries() {
               <td>{d.succeeded ? <span className="pill green">ok</span> : <span className="pill red">pendiente</span>}</td>
               <td>{!d.succeeded && (
                 <button onClick={async () => {
-                  try { await api.post(`/config/webhook-deliveries/${d.id}/redeliver`); window.alert("Re-entrega encolada"); load(); } catch (e) { showError(e); }
+                  try { await api.post(`/config/webhook-deliveries/${d.id}/redeliver`); await alertDialog("Re-entrega encolada"); load(); } catch (e) { showError(e); }
                 }}>Reintentar</button>
               )}</td>
             </tr>
@@ -1133,7 +1160,7 @@ function FailedMessages() {
             <td><span className="muted">{JSON.stringify(m.errorDetail)}</span></td>
             <td>
               <button onClick={async () => {
-                try { await api.post(`/config/messages/${m.id}/requeue`); window.alert("Re-encolado"); load(); } catch (e) { showError(e); }
+                try { await api.post(`/config/messages/${m.id}/requeue`); await alertDialog("Re-encolado"); load(); } catch (e) { showError(e); }
               }}>Re-encolar</button>
             </td>
           </tr>

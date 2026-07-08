@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, showError } from "../api";
 import { useAuth } from "../auth";
+import { Select } from "../ui/Select";
+import { confirmDialog, promptDialog } from "../ui/dialogs";
 
 type Stage = {
   id: string;
@@ -70,9 +72,13 @@ export default function Leads() {
   };
 
   const editLead = async (lead: Lead) => {
-    const title = window.prompt("Título:", lead.title);
+    const title = await promptDialog({ title: "Editar lead", message: "Título:", defaultValue: lead.title });
     if (title === null) return;
-    const valueStr = window.prompt("Valor (vacío = sin valor):", lead.value?.toString() ?? "");
+    const valueStr = await promptDialog({
+      title: "Editar lead",
+      message: "Valor (vacío = sin valor):",
+      defaultValue: lead.value?.toString() ?? "",
+    });
     if (valueStr === null) return;
     try {
       await api.patch(`/leads/${lead.id}`, {
@@ -86,7 +92,13 @@ export default function Leads() {
   };
 
   const removeLead = async (lead: Lead) => {
-    if (!window.confirm(`¿Borrar el lead "${lead.title}"?`)) return;
+    const ok = await confirmDialog({
+      title: "Borrar lead",
+      message: `¿Borrar el lead "${lead.title}"?`,
+      confirmLabel: "Borrar",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api.del(`/leads/${lead.id}`);
       await load();
@@ -96,7 +108,7 @@ export default function Leads() {
   };
 
   const addStage = async () => {
-    const name = window.prompt("Nombre de la nueva etapa:");
+    const name = await promptDialog({ title: "Nueva etapa", message: "Nombre de la nueva etapa:" });
     if (!name?.trim() || !pipelineId) return;
     try {
       await api.post(`/pipelines/${pipelineId}/stages`, { name: name.trim() });
@@ -107,7 +119,7 @@ export default function Leads() {
   };
 
   const renameStage = async (s: Stage) => {
-    const name = window.prompt("Renombrar etapa:", s.name);
+    const name = await promptDialog({ title: "Renombrar etapa", message: "Nuevo nombre:", defaultValue: s.name });
     if (!name?.trim()) return;
     try {
       await api.patch(`/stages/${s.id}`, {
@@ -128,15 +140,22 @@ export default function Leads() {
     if (s.leadCount > 0) {
       const others = pipeline.stages.filter((x) => x.id !== s.id);
       const names = others.map((x, i) => `${i + 1}. ${x.name}`).join("\n");
-      const pick = window.prompt(
-        `La etapa tiene ${s.leadCount} leads. ¿A qué etapa moverlos?\n${names}\n(número)`,
-      );
+      const pick = await promptDialog({
+        title: "Eliminar etapa",
+        message: `La etapa tiene ${s.leadCount} leads. ¿A qué etapa moverlos?\n${names}\n(número)`,
+      });
       if (!pick) return;
       const idx = Number(pick) - 1;
       if (!others[idx]) return;
       target = `?moveLeadsToStageId=${others[idx].id}`;
-    } else if (!window.confirm(`¿Eliminar la etapa "${s.name}"?`)) {
-      return;
+    } else {
+      const ok = await confirmDialog({
+        title: "Eliminar etapa",
+        message: `¿Eliminar la etapa "${s.name}"?`,
+        confirmLabel: "Eliminar",
+        danger: true,
+      });
+      if (!ok) return;
     }
     try {
       await api.del(`/stages/${s.id}${target}`);
@@ -150,13 +169,12 @@ export default function Leads() {
     <div className="page" style={{ maxWidth: "none" }}>
       <h2>Leads</h2>
       <div className="row" style={{ marginBottom: 16 }}>
-        <select value={pipelineId} onChange={(e) => setPipelineId(e.target.value)}>
-          {pipelines.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name} {p.isDefault ? "★" : ""}
-            </option>
-          ))}
-        </select>
+        <Select
+          style={{ width: 220 }}
+          value={pipelineId}
+          onChange={setPipelineId}
+          options={pipelines.map((p) => ({ value: p.id, label: `${p.name}${p.isDefault ? " ★" : ""}` }))}
+        />
         <input placeholder="Buscar…" value={q} onChange={(e) => setQ(e.target.value)} />
         {can("pipelines:manage") && <button onClick={addStage}>＋ Etapa</button>}
       </div>
@@ -217,13 +235,12 @@ export default function Leads() {
                     </div>
                   )}
                   {can("leads:move_stage") && (
-                    <select value={l.stageId} onChange={(e) => move(l, e.target.value)}>
-                      {pipeline.stages.map((x) => (
-                        <option key={x.id} value={x.id}>
-                          {x.name}
-                        </option>
-                      ))}
-                    </select>
+                    <Select
+                      style={{ width: "100%", marginTop: 8 }}
+                      value={l.stageId}
+                      onChange={(v) => move(l, v)}
+                      options={pipeline.stages.map((x) => ({ value: x.id, label: x.name }))}
+                    />
                   )}
                   <div className="row" style={{ marginTop: 6, gap: 4 }}>
                     {can("leads:write") && <button onClick={() => editLead(l)}>Editar</button>}
