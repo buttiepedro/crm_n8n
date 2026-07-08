@@ -25,7 +25,13 @@ type Msg = {
   body: string | null;
   status: string;
   createdAt: string;
-  attachments: { id: string; mimeType: string; fileName: string | null; downloadStatus: string }[];
+  attachments: {
+    id: string;
+    mimeType: string;
+    fileName: string | null;
+    downloadStatus: string;
+    transcript: string | null;
+  }[];
 };
 type NoteT = {
   id: string;
@@ -51,6 +57,7 @@ export default function Inbox() {
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [text, setText] = useState("");
   const [noteText, setNoteText] = useState("");
+  const [expandedAudio, setExpandedAudio] = useState<Set<string>>(new Set());
   const bottomRef = useRef<HTMLDivElement>(null);
   const selectedId = selected?.id ?? null;
 
@@ -311,17 +318,46 @@ export default function Inbox() {
               {msgs.map((m) => (
                 <div key={m.id} className={`bubble ${m.direction === "inbound" ? "in" : "out"}`}>
                   {m.body || <i>[{m.type}]</i>}
-                  {m.attachments.map((a) => (
-                    <div key={a.id} style={{ marginTop: 6 }}>
-                      {a.downloadStatus === "done" ? (
-                        <a href={`/api/v1/attachments/${a.id}/download`} target="_blank" rel="noopener noreferrer">
-                          📎 {a.fileName || a.mimeType}
-                        </a>
-                      ) : (
-                        <span className="muted">📎 {a.mimeType} ({a.downloadStatus})</span>
-                      )}
-                    </div>
-                  ))}
+                  {m.attachments.map((a) =>
+                    a.mimeType.startsWith("audio/") ? (
+                      <div key={a.id} style={{ marginTop: 6 }}>
+                        <div>
+                          🎤 {a.transcript ?? <i className="muted">transcribiendo…</i>}
+                        </div>
+                        {a.downloadStatus === "done" && (
+                          <>
+                            {expandedAudio.has(a.id) ? (
+                              <audio
+                                controls
+                                autoPlay
+                                style={{ marginTop: 4, maxWidth: 240 }}
+                                src={`/api/v1/attachments/${a.id}/download`}
+                              />
+                            ) : (
+                              <button
+                                style={{ marginTop: 4, fontSize: "0.85em", padding: "2px 8px" }}
+                                onClick={() =>
+                                  setExpandedAudio((prev) => new Set(prev).add(a.id))
+                                }
+                              >
+                                ▶ escuchar audio
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    ) : (
+                      <div key={a.id} style={{ marginTop: 6 }}>
+                        {a.downloadStatus === "done" ? (
+                          <a href={`/api/v1/attachments/${a.id}/download`} target="_blank" rel="noopener noreferrer">
+                            📎 {a.fileName || a.mimeType}
+                          </a>
+                        ) : (
+                          <span className="muted">📎 {a.mimeType} ({a.downloadStatus})</span>
+                        )}
+                      </div>
+                    )
+                  )}
                   <div className="meta">
                     {m.direction === "outbound" && `${m.origin === "n8n" ? "n8n" : "agente"} · ${m.status} · `}
                     {fmt(m.createdAt)}

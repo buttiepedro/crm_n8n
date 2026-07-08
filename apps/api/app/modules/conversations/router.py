@@ -70,7 +70,7 @@ def _message_row(m: Message, attachments: list[Attachment]) -> dict:
         "waTimestamp": m.wa_timestamp.isoformat() if m.wa_timestamp else None,
         "attachments": [
             {"id": str(a.id), "mimeType": a.mime_type, "fileName": a.file_name,
-             "downloadStatus": a.download_status.value}
+             "downloadStatus": a.download_status.value, "transcript": a.transcript}
             for a in attachments
         ],
     }
