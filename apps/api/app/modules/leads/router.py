@@ -39,10 +39,11 @@ def _stage_row(s: PipelineStage, count: int | None = None, value: Decimal | None
     return data
 
 
-def _lead_row(lead: Lead, contact: Contact | None = None) -> dict:
+def _lead_row(lead: Lead, contact: Contact | None = None, notes: list[str] | None = None) -> dict:
     return {
         "id": str(lead.id),
         "title": lead.title,
+        "notes": notes or [],
         "value": float(lead.value) if lead.value is not None else None,
         "currency": lead.currency,
         "source": lead.source.value,
@@ -261,7 +262,23 @@ async def list_leads(
         stmt = stmt.where(sa.or_(Lead.title.ilike(like), Contact.profile_name.ilike(like),
                                  Contact.wa_id.like(like)))
     rows = (await db.execute(stmt)).all()
-    return {"items": [_lead_row(lead, contact) for lead, contact in rows]}
+
+    lead_ids = [lead.id for lead, _ in rows]
+    notes_by_lead: dict[uuid.UUID, list[str]] = {}
+    if lead_ids:
+        note_rows = (await db.execute(
+            sa.select(Note.lead_id, Note.body)
+            .where(Note.lead_id.in_(lead_ids), Note.deleted_at.is_(None))
+            .order_by(Note.lead_id, Note.created_at.desc())
+        )).all()
+        for note_lead_id, body in note_rows:
+            notes_by_lead.setdefault(note_lead_id, []).append(body)
+
+    return {
+        "items": [
+            _lead_row(lead, contact, notes_by_lead.get(lead.id)) for lead, contact in rows
+        ]
+    }
 
 
 class LeadCreateIn(CamelModel):

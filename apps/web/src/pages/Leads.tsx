@@ -17,6 +17,7 @@ type Pipeline = { id: string; name: string; isDefault: boolean; stages: Stage[] 
 type Lead = {
   id: string;
   title: string;
+  notes: string[];
   value: number | null;
   currency: string | null;
   stageId: string;
@@ -31,6 +32,10 @@ export default function Leads() {
   const [pipelineId, setPipelineId] = useState<string>("");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [q, setQ] = useState("");
+  const [expandedNotes, setExpandedNotes] = useState<Record<string, boolean>>({});
+
+  const toggleNotes = (leadId: string) =>
+    setExpandedNotes((prev) => ({ ...prev, [leadId]: !prev[leadId] }));
 
   const load = useCallback(async () => {
     try {
@@ -185,6 +190,32 @@ export default function Leads() {
                     {l.value != null && ` · ${l.currency} ${Number(l.value).toLocaleString()}`}
                     {l.source === "n8n_webhook" && " · n8n"}
                   </div>
+                  {l.notes.length > 0 && (
+                    <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                      <div>{l.notes[0]}</div>
+                      {l.notes.length > 1 && expandedNotes[l.id] && (
+                        <div style={{ marginTop: 2 }}>
+                          {l.notes.slice(1).map((n, i) => (
+                            <div key={i} style={{ marginTop: 2 }}>
+                              {n}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {l.notes.length > 1 && (
+                        <a
+                          href="#"
+                          style={{ display: "block", marginTop: 2 }}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            toggleNotes(l.id);
+                          }}
+                        >
+                          {expandedNotes[l.id] ? "Ver menos" : `+${l.notes.length - 1} más`}
+                        </a>
+                      )}
+                    </div>
+                  )}
                   {can("leads:move_stage") && (
                     <select value={l.stageId} onChange={(e) => move(l, e.target.value)}>
                       {pipeline.stages.map((x) => (
