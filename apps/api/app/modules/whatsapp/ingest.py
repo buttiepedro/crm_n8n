@@ -186,8 +186,7 @@ async def _ingest_message(session: AsyncSession, parsed: ParsedInboundMessage) -
                 content=OutboundMessageContent(
                     type="text",
                     body=(
-                        f'De tu audio entendí: "{attachment.transcript}"\n\n'
-                        "Por favor no envíes más mensajes mientras genero una respuesta"
+                        f'De tu audio entendí: "{attachment.transcript}'
                     ),
                 ),
                 origin=MessageOrigin.system,
