@@ -641,11 +641,7 @@ code.k {
 .ui-select-trigger.open .ui-select-chevron { transform: rotate(180deg); }
 
 .ui-popover {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 6px);
-  left: 0;
-  min-width: 100%;
+  z-index: 1000;
   max-height: 280px;
   overflow-y: auto;
   background: var(--bg-card);
