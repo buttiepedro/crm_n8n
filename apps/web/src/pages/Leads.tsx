@@ -94,12 +94,6 @@ function formatDate(iso: string) {
   });
 }
 
-function movedByLabel(movedBy: string) {
-  if (movedBy.startsWith("webhook:")) return "n8n";
-  if (movedBy.startsWith("user:")) return "Usuario";
-  return movedBy;
-}
-
 function authorLabel(source: string) {
   return source === "n8n_webhook" ? "n8n" : "Usuario";
 }
@@ -546,30 +540,6 @@ function LeadDetailModal({
                   />
                 </section>
               )}
-
-              <section className="lead-modal-section">
-                <h4>Recorrido</h4>
-                {lead.history.length === 0 ? (
-                  <p className="muted">Sin movimientos registrados.</p>
-                ) : (
-                  <ul className="lead-timeline">
-                    {lead.history.map((ev, i) => (
-                      <li key={i} className="lead-timeline-item">
-                        <span
-                          className="lead-timeline-dot"
-                          style={{ background: stageColorMap[ev.toStageId] ?? "var(--color-primary)" }}
-                        />
-                        <div className="lead-timeline-main">
-                          <span className="lead-timeline-stage">
-                            {stages.find((s) => s.id === ev.toStageId)?.name ?? "—"}
-                          </span>
-                          <span className="muted"> · {movedByLabel(ev.movedBy)} · {formatDate(ev.at)}</span>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
 
               <section className="lead-modal-section">
                 <h4>Notas</h4>
