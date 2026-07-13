@@ -7,6 +7,7 @@ import { Select } from "../ui/Select";
 import { Switch } from "../ui/Switch";
 import { confirmDialog, promptDialog } from "../ui/dialogs";
 import { AudioPlayer } from "../ui/AudioPlayer";
+import { LeadFormDialog, type LeadFormValues } from "../ui/LeadFormDialog";
 
 type Conv = {
   id: string;
@@ -62,6 +63,7 @@ export default function Inbox() {
   const [text, setText] = useState("");
   const [noteText, setNoteText] = useState("");
   const [expandedAudio, setExpandedAudio] = useState<Set<string>>(new Set());
+  const [showCreateLead, setShowCreateLead] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const selectedId = selected?.id ?? null;
 
@@ -161,13 +163,28 @@ export default function Inbox() {
     }
   };
 
-  const createLead = async () => {
+  const createLead = async (values: LeadFormValues) => {
     if (!selected) return;
+    const attributes: Record<string, string> = {};
+    if (values.company.trim()) attributes.company = values.company.trim();
+    if (values.priority) attributes.priority = values.priority;
     try {
-      await api.post("/leads", { conversationId: selected.id });
+      await api.post("/leads", {
+        conversationId: selected.id,
+        title: values.title.trim(),
+        stageId: values.stageId || undefined,
+        value: values.value.trim() ? Number(values.value) : null,
+        currency: values.currency,
+        attributes,
+      });
+      if (values.notes.trim()) {
+        await api.post(`/conversations/${selected.id}/notes`, { body: values.notes.trim() });
+      }
+      setShowCreateLead(false);
       await loadConvs();
     } catch (e) {
       showError(e);
+      throw e;
     }
   };
 
@@ -410,7 +427,7 @@ export default function Inbox() {
               {selected.leadId ? (
                 <LeadBox leadId={selected.leadId} stages={stages} onChanged={loadConvs} />
               ) : can("leads:write") ? (
-                <button onClick={createLead}>＋ Crear lead</button>
+                <button onClick={() => setShowCreateLead(true)}>＋ Crear lead</button>
               ) : (
                 <span className="muted">Sin lead</span>
               )}
@@ -450,6 +467,25 @@ export default function Inbox() {
           </>
         )}
       </div>
+
+      {showCreateLead && selected && (
+        <LeadFormDialog
+          mode="create"
+          contact={selected.contact}
+          stages={stages}
+          initial={{
+            title: `Lead ${selected.contact.profileName || selected.contact.waId}`,
+            company: "",
+            priority: "",
+            stageId: stages[0]?.id ?? "",
+            value: "",
+            currency: "ARS",
+            notes: "",
+          }}
+          onCancel={() => setShowCreateLead(false)}
+          onSubmit={createLead}
+        />
+      )}
     </div>
   );
 }

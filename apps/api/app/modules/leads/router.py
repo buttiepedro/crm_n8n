@@ -3,9 +3,11 @@
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Query
+from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError
@@ -287,6 +289,7 @@ class LeadCreateIn(CamelModel):
     value: Decimal | None = None
     currency: str | None = None
     stage_id: uuid.UUID | None = None
+    attributes: dict[str, Any] = Field(default_factory=dict)
 
 
 @router.post("/leads", status_code=201)
@@ -327,7 +330,7 @@ async def create_lead(
         pipeline_id=pipeline_id, stage_id=stage.id,
         title=body.title or f"Lead {contact.profile_name or contact.wa_id}",
         value=body.value, currency=body.currency or "ARS", source=LeadSource.manual,
-        owner_user_id=auth.user.id,
+        owner_user_id=auth.user.id, attributes=body.attributes,
     )
     db.add(lead)
     await db.flush()
@@ -382,6 +385,7 @@ class LeadPatch(CamelModel):
     value: Decimal | None = None
     currency: str | None = None
     owner_user_id: uuid.UUID | None = None
+    attributes: dict[str, Any] | None = None
 
 
 @router.patch("/leads/{lead_id}")
@@ -403,6 +407,8 @@ async def update_lead(
         lead.currency = body.currency
     if "owner_user_id" in provided:
         lead.owner_user_id = body.owner_user_id
+    if "attributes" in provided and body.attributes is not None:
+        lead.attributes = {**lead.attributes, **body.attributes}
     await log_event(db, actor_type="user", actor_id=auth.user.id, action="lead.updated",
                     entity_type="lead", entity_id=lead.id)
     await db.commit()

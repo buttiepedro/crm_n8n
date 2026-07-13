@@ -1,9 +1,38 @@
 /** Embudo de leads: kanban por pipeline con etapas configurables. */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { api, showError } from "../api";
 import { useAuth } from "../auth";
 import { Select } from "../ui/Select";
 import { confirmDialog, promptDialog } from "../ui/dialogs";
+import { LeadFormDialog, type LeadFormValues } from "../ui/LeadFormDialog";
+
+const ICON = { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
+
+const PencilIcon = () => (
+  <svg {...ICON} aria-hidden>
+    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z" />
+  </svg>
+);
+const TrashIcon = () => (
+  <svg {...ICON} aria-hidden>
+    <polyline points="3 6 5 6 21 6" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    <line x1="10" y1="11" x2="10" y2="17" />
+    <line x1="14" y1="11" x2="14" y2="17" />
+  </svg>
+);
+const PlusIcon = () => (
+  <svg {...ICON} aria-hidden>
+    <line x1="12" y1="5" x2="12" y2="19" />
+    <line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+);
+const CloseIcon = () => (
+  <svg {...ICON} aria-hidden>
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);
 
 type Stage = {
   id: string;
@@ -24,9 +53,56 @@ type Lead = {
   currency: string | null;
   stageId: string;
   source: string;
+  attributes: Record<string, unknown>;
   contact: { profileName: string | null; waId: string } | null;
   conversationId: string | null;
 };
+type LeadHistoryEvent = { fromStageId: string | null; toStageId: string; movedBy: string; at: string };
+type LeadNote = { id: string; body: string; authorSource: string; updatedAt: string };
+type LeadDetail = Omit<Lead, "notes"> & {
+  ownerUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  externalKey: string | null;
+  history: LeadHistoryEvent[];
+  notes: LeadNote[];
+};
+
+/* Forma mínima que comparten Lead (lista) y LeadDetail (modal) para las
+ * acciones — evita acoplar move/editLead/removeLead al shape de notas. */
+type LeadRef = { id: string; title: string; value: number | null; stageId: string };
+
+/* Paleta de respaldo cuando la etapa no tiene color asignado */
+const STAGE_COLORS = ["#6366f1", "#0ea5e9", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6", "#14b8a6", "#ef4444"];
+
+function getCompany(attrs: Record<string, unknown> | undefined): string | null {
+  const v = attrs?.company ?? attrs?.empresa ?? attrs?.Company ?? attrs?.Empresa;
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+function getPriority(attrs: Record<string, unknown> | undefined): "" | "baja" | "media" | "alta" {
+  const v = attrs?.priority;
+  return v === "baja" || v === "media" || v === "alta" ? v : "";
+}
+
+const PRIORITY_PILL_CLASS: Record<string, string> = { alta: "pill red", media: "pill yellow", baja: "pill" };
+const PRIORITY_LABEL: Record<string, string> = { alta: "Alta", media: "Media", baja: "Baja" };
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleString("es-AR", {
+    day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function movedByLabel(movedBy: string) {
+  if (movedBy.startsWith("webhook:")) return "n8n";
+  if (movedBy.startsWith("user:")) return "Usuario";
+  return movedBy;
+}
+
+function authorLabel(source: string) {
+  return source === "n8n_webhook" ? "n8n" : "Usuario";
+}
 
 export default function Leads() {
   const { can } = useAuth();
@@ -34,10 +110,11 @@ export default function Leads() {
   const [pipelineId, setPipelineId] = useState<string>("");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [q, setQ] = useState("");
-  const [expandedNotes, setExpandedNotes] = useState<Record<string, boolean>>({});
-
-  const toggleNotes = (leadId: string) =>
-    setExpandedNotes((prev) => ({ ...prev, [leadId]: !prev[leadId] }));
+  const [dragLead, setDragLead] = useState<Lead | null>(null);
+  const [overStage, setOverStage] = useState<string | null>(null);
+  const [detail, setDetail] = useState<LeadDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [editingLead, setEditingLead] = useState<LeadDetail | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -62,36 +139,81 @@ export default function Leads() {
 
   const pipeline = pipelines.find((p) => p.id === pipelineId);
 
-  const move = async (lead: Lead, stageId: string) => {
+  // Color estable por etapa: el propio (config) o uno de la paleta de respaldo
+  // por posición — se reutiliza en la columna y en el recorrido del modal.
+  const stageColorMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    pipeline?.stages.forEach((s, i) => {
+      map[s.id] = s.color || STAGE_COLORS[i % STAGE_COLORS.length];
+    });
+    return map;
+  }, [pipeline]);
+
+  const move = async (lead: LeadRef, stageId: string) => {
+    if (lead.stageId === stageId) return;
+    // Optimista: la tarjeta cambia de columna al instante; se revierte si el PATCH falla.
+    const prev = leads;
+    setLeads((ls) => ls.map((x) => (x.id === lead.id ? { ...x, stageId } : x)));
+    setDetail((d) => (d && d.id === lead.id ? { ...d, stageId } : d));
     try {
       await api.patch(`/leads/${lead.id}/stage`, { stageId });
       await load();
     } catch (e) {
+      setLeads(prev);
+      setDetail((d) => (d && d.id === lead.id ? { ...d, stageId: lead.stageId } : d));
       showError(e);
     }
   };
 
-  const editLead = async (lead: Lead) => {
-    const title = await promptDialog({ title: "Editar lead", message: "Título:", defaultValue: lead.title });
-    if (title === null) return;
-    const valueStr = await promptDialog({
-      title: "Editar lead",
-      message: "Valor (vacío = sin valor):",
-      defaultValue: lead.value?.toString() ?? "",
-    });
-    if (valueStr === null) return;
+  const canDrag = can("leads:move_stage");
+
+  const onDrop = (stageId: string) => {
+    if (dragLead) move(dragLead, stageId);
+    setDragLead(null);
+    setOverStage(null);
+  };
+
+  const openLead = async (lead: Lead) => {
+    setDetailLoading(true);
     try {
-      await api.patch(`/leads/${lead.id}`, {
-        title: title.trim() || undefined,
-        value: valueStr.trim() ? Number(valueStr) : null,
+      const full = await api.get<LeadDetail>(`/leads/${lead.id}`);
+      setDetail(full);
+    } catch (e) {
+      showError(e);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const closeDetail = () => setDetail(null);
+
+  const startEdit = (lead: LeadDetail) => {
+    setEditingLead(lead);
+    closeDetail();
+  };
+
+  const saveLeadEdit = async (values: LeadFormValues) => {
+    if (!editingLead) return;
+    const attributes: Record<string, string> = { company: values.company.trim(), priority: values.priority };
+    try {
+      await api.patch(`/leads/${editingLead.id}`, {
+        title: values.title.trim(),
+        value: values.value.trim() ? Number(values.value) : null,
+        currency: values.currency,
+        attributes,
       });
+      if (values.stageId !== editingLead.stageId) {
+        await move(editingLead, values.stageId);
+      }
+      setEditingLead(null);
       await load();
     } catch (e) {
       showError(e);
+      throw e;
     }
   };
 
-  const removeLead = async (lead: Lead) => {
+  const removeLead = async (lead: LeadRef) => {
     const ok = await confirmDialog({
       title: "Borrar lead",
       message: `¿Borrar el lead "${lead.title}"?`,
@@ -101,6 +223,7 @@ export default function Leads() {
     if (!ok) return;
     try {
       await api.del(`/leads/${lead.id}`);
+      if (detail && detail.id === lead.id) closeDetail();
       await load();
     } catch (e) {
       showError(e);
@@ -176,84 +299,329 @@ export default function Leads() {
           options={pipelines.map((p) => ({ value: p.id, label: `${p.name}${p.isDefault ? " ★" : ""}` }))}
         />
         <input placeholder="Buscar…" value={q} onChange={(e) => setQ(e.target.value)} />
-        {can("pipelines:manage") && <button onClick={addStage}>＋ Etapa</button>}
+        {can("pipelines:manage") && (
+          <button className="btn-icon-label" onClick={addStage}>
+            <PlusIcon /> Etapa
+          </button>
+        )}
       </div>
 
       <div className="kanban">
-        {pipeline?.stages.map((s) => (
-          <div className="kcol" key={s.id}>
-            <h4>
-              <span>
-                {s.name} <span className="muted">({s.leadCount})</span>
-              </span>
-              {can("pipelines:manage") && (
-                <span>
-                  <a href="#" onClick={(e) => { e.preventDefault(); renameStage(s); }}>✎</a>{" "}
-                  <a href="#" onClick={(e) => { e.preventDefault(); deleteStage(s); }}>🗑</a>
+        {pipeline?.stages.map((s, si) => {
+          const stageLeads = leads.filter((l) => l.stageId === s.id);
+          const total = stageLeads.reduce((acc, l) => acc + (l.value != null ? Number(l.value) : 0), 0);
+          const color = stageColorMap[s.id] || STAGE_COLORS[si % STAGE_COLORS.length];
+          const isOver = overStage === s.id && dragLead != null && dragLead.stageId !== s.id;
+          return (
+            <div
+              className={`kcol${isOver ? " drag-over" : ""}`}
+              key={s.id}
+              style={{ "--stage-color": color } as CSSProperties}
+              onDragOver={(e) => {
+                if (!dragLead) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (overStage !== s.id) setOverStage(s.id);
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) setOverStage(null);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                onDrop(s.id);
+              }}
+            >
+              <div className="kcol-rail" />
+              <h4>
+                <span className="kcol-title">
+                  <i className="kcol-dot" />
+                  {s.name}
+                  <span className="kcol-count">{stageLeads.length}</span>
                 </span>
-              )}
-            </h4>
-            {s.totalValue > 0 && (
-              <div className="muted" style={{ marginBottom: 6, fontSize: 12 }}>
-                Σ {s.totalValue.toLocaleString()}
-              </div>
-            )}
-            {leads
-              .filter((l) => l.stageId === s.id)
-              .map((l) => (
-                <div className="kcard" key={l.id}>
-                  <div className="t">{l.title}</div>
-                  <div className="sub">
-                    {l.contact?.profileName || l.contact?.waId}
-                    {l.value != null && ` · ${l.currency} ${Number(l.value).toLocaleString()}`}
-                    {l.source === "n8n_webhook" && " · n8n"}
-                  </div>
-                  {l.notes.length > 0 && (
-                    <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                      <div>{l.notes[0]}</div>
-                      {l.notes.length > 1 && expandedNotes[l.id] && (
-                        <div style={{ marginTop: 2 }}>
-                          {l.notes.slice(1).map((n, i) => (
-                            <div key={i} style={{ marginTop: 2 }}>
-                              {n}
-                            </div>
-                          ))}
+                {can("pipelines:manage") && (
+                  <span className="kcol-actions">
+                    <button title="Renombrar etapa" aria-label="Renombrar etapa" onClick={() => renameStage(s)}>
+                      <PencilIcon />
+                    </button>
+                    <button title="Eliminar etapa" aria-label="Eliminar etapa" onClick={() => deleteStage(s)}>
+                      <TrashIcon />
+                    </button>
+                  </span>
+                )}
+              </h4>
+              {total > 0 && <div className="kcol-sum">Σ {total.toLocaleString()}</div>}
+              <div className="kcol-body">
+                {stageLeads.map((l) => {
+                  const name = l.contact?.profileName || l.contact?.waId || l.title;
+                  const company = getCompany(l.attributes);
+                  const priority = getPriority(l.attributes);
+                  return (
+                    <div
+                      className={`kcard${dragLead?.id === l.id ? " dragging" : ""}`}
+                      key={l.id}
+                      draggable={canDrag}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openLead(l)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          openLead(l);
+                        }
+                      }}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("text/plain", l.id);
+                        e.dataTransfer.effectAllowed = "move";
+                        setDragLead(l);
+                      }}
+                      onDragEnd={() => {
+                        setDragLead(null);
+                        setOverStage(null);
+                      }}
+                    >
+                      <div className="kcard-head">
+                        <div className="kcard-avatar" aria-hidden>
+                          {name.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="kcard-id">
+                          <div className="t">{name}</div>
+                          {l.contact?.waId && <div className="kcard-phone">+{l.contact.waId}</div>}
+                        </div>
+                      </div>
+                      {company && <div className="kcard-company">{company}</div>}
+                      {(l.value != null || l.source === "n8n_webhook" || priority) && (
+                        <div className="kcard-foot">
+                          {l.value != null && (
+                            <span className="kcard-value">
+                              {l.currency} {Number(l.value).toLocaleString()}
+                            </span>
+                          )}
+                          {priority && <span className={PRIORITY_PILL_CLASS[priority]}>{PRIORITY_LABEL[priority]}</span>}
+                          {l.source === "n8n_webhook" && <span className="pill">n8n</span>}
                         </div>
                       )}
-                      {l.notes.length > 1 && (
-                        <a
-                          href="#"
-                          style={{ display: "block", marginTop: 2 }}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            toggleNotes(l.id);
-                          }}
-                        >
-                          {expandedNotes[l.id] ? "Ver menos" : `+${l.notes.length - 1} más`}
-                        </a>
-                      )}
                     </div>
+                  );
+                })}
+                {isOver && <div className="kcol-drop-hint">Soltar aquí</div>}
+                {stageLeads.length === 0 && !isOver && (
+                  <div className="kcol-empty">{canDrag ? "Arrastra leads aquí" : "Sin leads"}</div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {(detail || detailLoading) && (
+        <LeadDetailModal
+          lead={detail}
+          loading={detailLoading}
+          stageColorMap={stageColorMap}
+          stages={pipeline?.stages ?? []}
+          canMoveStage={canDrag}
+          canEdit={can("leads:write")}
+          canDelete={can("leads:delete")}
+          onClose={closeDetail}
+          onMoveStage={(stageId) => detail && move(detail, stageId)}
+          onEdit={() => detail && startEdit(detail)}
+          onDelete={() => detail && removeLead(detail)}
+        />
+      )}
+
+      {editingLead && (
+        <LeadFormDialog
+          mode="edit"
+          contact={editingLead.contact}
+          stages={pipeline?.stages ?? []}
+          initial={{
+            title: editingLead.title,
+            company: getCompany(editingLead.attributes) ?? "",
+            priority: getPriority(editingLead.attributes),
+            stageId: editingLead.stageId,
+            value: editingLead.value != null ? String(editingLead.value) : "",
+            currency: editingLead.currency ?? "ARS",
+            notes: "",
+          }}
+          onCancel={() => setEditingLead(null)}
+          onSubmit={saveLeadEdit}
+        />
+      )}
+    </div>
+  );
+}
+
+function LeadDetailModal({
+  lead,
+  loading,
+  stageColorMap,
+  stages,
+  canMoveStage,
+  canEdit,
+  canDelete,
+  onClose,
+  onMoveStage,
+  onEdit,
+  onDelete,
+}: {
+  lead: LeadDetail | null;
+  loading: boolean;
+  stageColorMap: Record<string, string>;
+  stages: Stage[];
+  canMoveStage: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  onClose: () => void;
+  onMoveStage: (stageId: string) => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [onClose]);
+
+  const name = lead?.contact?.profileName || lead?.contact?.waId || lead?.title || "";
+  const company = getCompany(lead?.attributes);
+  const priority = getPriority(lead?.attributes);
+  const currentStageColor = lead ? stageColorMap[lead.stageId] : undefined;
+  const HIDDEN_ATTR_KEYS = ["company", "empresa", "Company", "Empresa", "priority"];
+  const extraAttrs = lead
+    ? Object.entries(lead.attributes).filter(
+        ([k, v]) => !HIDDEN_ATTR_KEYS.includes(k) && v != null && v !== ""
+      )
+    : [];
+
+  return (
+    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="dialog-box lead-modal" role="dialog" aria-modal="true">
+        {loading || !lead ? (
+          <div className="lead-modal-loading muted">Cargando…</div>
+        ) : (
+          <>
+            <div className="lead-modal-head">
+              <div className="kcard-avatar lead-modal-avatar" aria-hidden>
+                {name.charAt(0).toUpperCase()}
+              </div>
+              <div className="lead-modal-id">
+                <h3 className="dialog-title">{name}</h3>
+                <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                  {lead.contact?.waId && <span className="kcard-phone">+{lead.contact.waId}</span>}
+                  {company && <span className="pill">{company}</span>}
+                  {priority && <span className={PRIORITY_PILL_CLASS[priority]}>{PRIORITY_LABEL[priority]}</span>}
+                  {lead.value != null && (
+                    <span className="pill green">
+                      {lead.currency} {Number(lead.value).toLocaleString()}
+                    </span>
                   )}
-                  {can("leads:move_stage") && (
-                    <Select
-                      style={{ width: "100%", marginTop: 8 }}
-                      value={l.stageId}
-                      onChange={(v) => move(l, v)}
-                      options={pipeline.stages.map((x) => ({ value: x.id, label: x.name }))}
-                    />
-                  )}
-                  <div className="row" style={{ marginTop: 6, gap: 4 }}>
-                    {can("leads:write") && <button onClick={() => editLead(l)}>Editar</button>}
-                    {can("leads:delete") && (
-                      <button className="danger" onClick={() => removeLead(l)}>
-                        Borrar
-                      </button>
-                    )}
-                  </div>
+                  <span
+                    className="pill pill-stage"
+                    style={{ "--stage-color": currentStageColor } as CSSProperties}
+                  >
+                    {stages.find((s) => s.id === lead.stageId)?.name ?? "—"}
+                  </span>
                 </div>
-              ))}
-          </div>
-        ))}
+              </div>
+              <button className="dialog-close" onClick={onClose} aria-label="Cerrar" title="Cerrar">
+                <CloseIcon />
+              </button>
+            </div>
+
+            <div className="lead-modal-body">
+              {canMoveStage && (
+                <section className="lead-modal-section">
+                  <h4>Etapa</h4>
+                  <Select
+                    style={{ width: "100%" }}
+                    value={lead.stageId}
+                    onChange={onMoveStage}
+                    options={stages.map((x) => ({ value: x.id, label: x.name }))}
+                  />
+                </section>
+              )}
+
+              <section className="lead-modal-section">
+                <h4>Recorrido</h4>
+                {lead.history.length === 0 ? (
+                  <p className="muted">Sin movimientos registrados.</p>
+                ) : (
+                  <ul className="lead-timeline">
+                    {lead.history.map((ev, i) => (
+                      <li key={i} className="lead-timeline-item">
+                        <span
+                          className="lead-timeline-dot"
+                          style={{ background: stageColorMap[ev.toStageId] ?? "var(--color-primary)" }}
+                        />
+                        <div className="lead-timeline-main">
+                          <span className="lead-timeline-stage">
+                            {stages.find((s) => s.id === ev.toStageId)?.name ?? "—"}
+                          </span>
+                          <span className="muted"> · {movedByLabel(ev.movedBy)} · {formatDate(ev.at)}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section className="lead-modal-section">
+                <h4>Notas</h4>
+                {lead.notes.length === 0 ? (
+                  <p className="muted">Sin notas.</p>
+                ) : (
+                  lead.notes.map((n) => (
+                    <div className="note" key={n.id}>
+                      <div>{n.body}</div>
+                      <div className="meta">
+                        <span>{authorLabel(n.authorSource)}</span>
+                        <span>{formatDate(n.updatedAt)}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </section>
+
+              <section className="lead-modal-section">
+                <h4>Detalle</h4>
+                <div className="lead-detail-grid">
+                  <div><span className="muted">Fuente</span><div>{lead.source === "n8n_webhook" ? "n8n" : "Manual"}</div></div>
+                  <div><span className="muted">Creado</span><div>{formatDate(lead.createdAt)}</div></div>
+                  <div><span className="muted">Actualizado</span><div>{formatDate(lead.updatedAt)}</div></div>
+                  {lead.externalKey && (
+                    <div><span className="muted">Clave externa</span><div><code className="k">{lead.externalKey}</code></div></div>
+                  )}
+                  {extraAttrs.map(([k, v]) => (
+                    <div key={k}>
+                      <span className="muted">{k}</span>
+                      <div>{String(v)}</div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+
+            <div className="dialog-actions">
+              {canEdit && (
+                <button className="btn-icon-label" onClick={onEdit}>
+                  <PencilIcon /> Editar
+                </button>
+              )}
+              {canDelete && (
+                <button className="btn-icon-label danger" onClick={onDelete}>
+                  <TrashIcon /> Borrar
+                </button>
+              )}
+              <button className="primary" onClick={onClose}>Cerrar</button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
