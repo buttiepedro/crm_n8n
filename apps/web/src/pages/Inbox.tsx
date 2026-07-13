@@ -2,6 +2,7 @@
  *  Tiempo real v1 por polling cada 5 s. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { TbRobot, TbRobotOff } from "react-icons/tb";
 import { api, showError } from "../api";
 import { useAuth } from "../auth";
 import { Select } from "../ui/Select";
@@ -453,7 +454,12 @@ export default function Inbox() {
                 <Switch
                   checked={!globalBotSilenced}
                   onChange={toggleGlobalBot}
-                  label={globalBotSilenced ? "🔇 Bot global silenciado" : "🤖 Bot global activo"}
+                  label={
+                    <span className="row" style={{ gap: 4 }}>
+                      {globalBotSilenced ? <TbRobotOff /> : <TbRobot />}
+                      {globalBotSilenced ? "Bot global silenciado" : "Bot global activo"}
+                    </span>
+                  }
                   className="btn-icon-label"
                 />
               </>
@@ -525,7 +531,12 @@ export default function Inbox() {
                 <Switch
                   checked={!selected.botPaused}
                   onChange={toggleBot}
-                  label={selected.botPaused ? "🔇 Bot silenciado" : "🤖 Bot activo"}
+                  label={
+                    <span className="row" style={{ gap: 4 }}>
+                      {selected.botPaused ? <TbRobotOff /> : <TbRobot />}
+                      {selected.botPaused ? "Bot silenciado" : "Bot activo"}
+                    </span>
+                  }
                   className="btn-icon-label"
                 />
               )}
