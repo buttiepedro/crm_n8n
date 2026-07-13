@@ -6,6 +6,14 @@ import { Select } from "./Select";
  *  de solo lectura); Editar se dispara desde el kanban con los valores
  *  actuales del lead precargados. */
 
+export type FieldDef = {
+  id: string;
+  key: string;
+  label: string;
+  type: "text" | "number" | "date" | "select";
+  options: string[] | null;
+};
+
 export type LeadFormValues = {
   title: string;
   company: string;
@@ -14,6 +22,7 @@ export type LeadFormValues = {
   value: string;
   currency: string;
   notes: string;
+  custom: Record<string, string>;
 };
 
 const PRIORITY_OPTIONS = [
@@ -34,6 +43,18 @@ const CloseIcon = () => (
     <line x1="6" y1="6" x2="18" y2="18" />
   </svg>
 );
+const SparkleIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+       strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8" />
+  </svg>
+);
+const CheckIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"
+       strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M20 6L9 17l-5-5" />
+  </svg>
+);
 
 export function LeadFormDialog({
   mode,
@@ -41,6 +62,8 @@ export function LeadFormDialog({
   channelLabel = "whatsapp",
   stages,
   initial,
+  customFields = [],
+  onAnalyze,
   onCancel,
   onSubmit,
 }: {
@@ -49,11 +72,18 @@ export function LeadFormDialog({
   channelLabel?: string;
   stages: { id: string; name: string }[];
   initial: LeadFormValues;
+  customFields?: FieldDef[];
+  /** Solo tiene efecto en mode="create": analiza la conversación con IA y
+   *  devuelve valores sugeridos para prellenar el form (el usuario revisa
+   *  antes de guardar). */
+  onAnalyze?: () => Promise<Partial<LeadFormValues>>;
   onCancel: () => void;
   onSubmit: (values: LeadFormValues) => Promise<void>;
 }) {
   const [values, setValues] = useState<LeadFormValues>(initial);
   const [saving, setSaving] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzed, setAnalyzed] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -69,6 +99,22 @@ export function LeadFormDialog({
 
   const set = <K extends keyof LeadFormValues>(key: K, v: LeadFormValues[K]) =>
     setValues((s) => ({ ...s, [key]: v }));
+  const setCustom = (key: string, v: string) =>
+    setValues((s) => ({ ...s, custom: { ...s.custom, [key]: v } }));
+
+  const analyze = async () => {
+    if (!onAnalyze || analyzing) return;
+    setAnalyzing(true);
+    try {
+      const suggested = await onAnalyze();
+      setValues((s) => ({ ...s, ...suggested, custom: { ...s.custom, ...suggested.custom } }));
+      setAnalyzed(true);
+    } catch {
+      // onAnalyze ya reportó el error (showError)
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   const submit = async () => {
     if (!values.title.trim() || saving) return;
@@ -101,6 +147,18 @@ export function LeadFormDialog({
             <span className="muted"> · {channelLabel}</span>
           </div>
         )}
+
+        <div className="lead-form-body">
+          {mode === "create" && onAnalyze && (
+            analyzed ? (
+              <div className="ai-analyzed-note"><CheckIcon /> Campos prellenados por IA — revisá antes de guardar</div>
+            ) : (
+              <button type="button" className="ai-analyze-btn" disabled={analyzing} onClick={analyze}>
+                <SparkleIcon /> {analyzing ? "Analizando conversación…" : "Analizar conversación con IA"}
+              </button>
+            )
+          )}
+        </div>
 
         <div className="lead-form-body form-grid">
           <label style={{ gridColumn: "1 / -1" }}>
@@ -148,6 +206,25 @@ export function LeadFormDialog({
               />
             </div>
           </label>
+
+          {customFields.map((f) => (
+            <label key={f.id}>
+              {f.label}
+              {f.type === "select" ? (
+                <Select
+                  value={values.custom[f.key] ?? ""}
+                  onChange={(v) => setCustom(f.key, v)}
+                  options={(f.options ?? []).map((o) => ({ value: o, label: o }))}
+                />
+              ) : (
+                <input
+                  type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
+                  value={values.custom[f.key] ?? ""}
+                  onChange={(e) => setCustom(f.key, e.target.value)}
+                />
+              )}
+            </label>
+          ))}
 
           {mode === "create" && (
             <label style={{ gridColumn: "1 / -1" }}>

@@ -1,13 +1,16 @@
 /** Bandeja de conversaciones: lista + hilo + panel lateral (lead y notas).
  *  Tiempo real v1 por polling cada 5 s. */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, showError } from "../api";
 import { useAuth } from "../auth";
 import { Select } from "../ui/Select";
 import { Switch } from "../ui/Switch";
 import { confirmDialog, promptDialog } from "../ui/dialogs";
 import { AudioPlayer } from "../ui/AudioPlayer";
-import { LeadFormDialog, type LeadFormValues } from "../ui/LeadFormDialog";
+import { AttachmentImage, AttachmentPdf } from "../ui/AttachmentPreview";
+import { LeadFormDialog, type FieldDef, type LeadFormValues } from "../ui/LeadFormDialog";
+import { TagChip, TagPicker, type TagT } from "../ui/TagPicker";
 
 type Conv = {
   id: string;
@@ -21,7 +24,49 @@ type Conv = {
   windowOpen: boolean;
   botPaused: boolean;
   leadId: string | null;
+  tags: TagT[];
 };
+
+const VIEWS = [
+  { key: "recent", label: "Recientes" },
+  { key: "person", label: "Por persona" },
+  { key: "tag", label: "Por tag" },
+] as const;
+type ViewKey = (typeof VIEWS)[number]["key"];
+type Group = { key: string; label: string; color: string | null; items: Conv[] };
+
+function groupConversations(convs: Conv[], view: ViewKey, users: { id: string; name: string }[]): Group[] | null {
+  if (view === "recent") return null;
+  if (view === "person") {
+    const groups = new Map<string, Group>();
+    const RESIDUAL = "￿";
+    for (const c of convs) {
+      const key = c.assignedUserId || RESIDUAL;
+      if (!groups.has(key)) {
+        const label = c.assignedUserId ? users.find((u) => u.id === c.assignedUserId)?.name || "…" : "Sin asignar";
+        groups.set(key, { key, label, color: null, items: [] });
+      }
+      groups.get(key)!.items.push(c);
+    }
+    return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key));
+  }
+  // view === "tag"
+  const groups = new Map<string, Group>();
+  const residual: Group = { key: "￿", label: "Sin etiqueta", color: null, items: [] };
+  for (const c of convs) {
+    if (c.tags.length === 0) {
+      residual.items.push(c);
+      continue;
+    }
+    for (const t of c.tags) {
+      if (!groups.has(t.id)) groups.set(t.id, { key: t.id, label: t.name, color: t.color, items: [] });
+      groups.get(t.id)!.items.push(c);
+    }
+  }
+  const arr = [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
+  if (residual.items.length) arr.push(residual);
+  return arr;
+}
 type Msg = {
   id: string;
   direction: string;
@@ -53,6 +98,7 @@ const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : "");
 
 export default function Inbox() {
   const { me, can } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [convs, setConvs] = useState<Conv[]>([]);
   const [filters, setFilters] = useState({ q: "", status: "", unread: false });
   const [selected, setSelected] = useState<Conv | null>(null);
@@ -60,12 +106,31 @@ export default function Inbox() {
   const [notes, setNotes] = useState<NoteT[]>([]);
   const [users, setUsers] = useState<UserLite[]>([]);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
+  const [customFields, setCustomFields] = useState<FieldDef[]>([]);
   const [text, setText] = useState("");
   const [noteText, setNoteText] = useState("");
   const [expandedAudio, setExpandedAudio] = useState<Set<string>>(new Set());
   const [showCreateLead, setShowCreateLead] = useState(false);
+  const [showTest, setShowTest] = useState(false);
+  const [view, setView] = useState<ViewKey>(() => (localStorage.getItem("crm-web:inbox:view") as ViewKey) || "recent");
+  const [groupFilter, setGroupFilter] = useState<string | null>(() => {
+    const v = (localStorage.getItem("crm-web:inbox:view") as ViewKey) || "recent";
+    return v === "recent" ? null : localStorage.getItem(`crm-web:inbox:filter:${v}`);
+  });
   const bottomRef = useRef<HTMLDivElement>(null);
   const selectedId = selected?.id ?? null;
+
+  const changeView = (v: ViewKey) => {
+    setView(v);
+    localStorage.setItem("crm-web:inbox:view", v);
+    setGroupFilter(v === "recent" ? null : localStorage.getItem(`crm-web:inbox:filter:${v}`));
+  };
+  const changeGroupFilter = (key: string | null) => {
+    setGroupFilter(key);
+    if (view === "recent") return;
+    if (key) localStorage.setItem(`crm-web:inbox:filter:${view}`, key);
+    else localStorage.removeItem(`crm-web:inbox:filter:${view}`);
+  };
 
   const loadConvs = useCallback(async () => {
     const params = new URLSearchParams();
@@ -116,9 +181,23 @@ export default function Inbox() {
 
   useEffect(() => {
     api.get<{ items: UserLite[] }>("/users").then((d) => setUsers(d.items)).catch(() => {});
-    if (can("leads:read"))
+    if (can("leads:read")) {
       api.get<{ items: Pipeline[] }>("/pipelines").then((d) => setPipelines(d.items)).catch(() => {});
+      api.get<{ items: FieldDef[] }>("/lead-field-definitions").then((d) => setCustomFields(d.items)).catch(() => {});
+    }
   }, [can]);
+
+  // Deep-link desde el detalle de un lead ("Ver conversación →", Leads.tsx):
+  // ?conversationId=<id> selecciona el hilo apenas carga la lista, y limpia
+  // el query param para que la URL quede prolija.
+  useEffect(() => {
+    const conversationId = searchParams.get("conversationId");
+    if (!conversationId || convs.length === 0) return;
+    const conv = convs.find((c) => c.id === conversationId);
+    if (conv) open(conv);
+    setSearchParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convs, searchParams]);
 
   const open = async (c: Conv) => {
     setSelected(c);
@@ -163,9 +242,39 @@ export default function Inbox() {
     }
   };
 
+  const deleteNote = async (n: NoteT) => {
+    const ok = await confirmDialog({ title: "Borrar nota", message: "¿Borrar esta nota?", confirmLabel: "Borrar", danger: true });
+    if (!ok) return;
+    try {
+      await api.del(`/notes/${n.id}`);
+      await loadThread();
+    } catch (e) {
+      showError(e);
+    }
+  };
+
+  const analyzeConversation = async (): Promise<Partial<LeadFormValues>> => {
+    if (!selected) return {};
+    try {
+      const r = await api.post<{ title: string | null; company: string | null; notes: string | null; stageId: string | null }>(
+        "/leads/analyze-conversation",
+        { conversationId: selected.id },
+      );
+      const out: Partial<LeadFormValues> = {};
+      if (r.title) out.title = r.title;
+      if (r.company) out.company = r.company;
+      if (r.notes) out.notes = r.notes;
+      if (r.stageId) out.stageId = r.stageId;
+      return out;
+    } catch (e) {
+      showError(e);
+      throw e;
+    }
+  };
+
   const createLead = async (values: LeadFormValues) => {
     if (!selected) return;
-    const attributes: Record<string, string> = {};
+    const attributes: Record<string, string> = { ...values.custom };
     if (values.company.trim()) attributes.company = values.company.trim();
     if (values.priority) attributes.priority = values.priority;
     try {
@@ -185,6 +294,24 @@ export default function Inbox() {
     } catch (e) {
       showError(e);
       throw e;
+    }
+  };
+
+  const bulkBotPause = async (paused: boolean) => {
+    const ok = await confirmDialog({
+      title: paused ? "Pausar todos los bots" : "Reanudar todos los bots",
+      message: paused
+        ? "Esto silencia el bot en TODAS las conversaciones (nadie va a recibir respuesta automática hasta que lo reactives)."
+        : "Esto reactiva el bot en todas las conversaciones que estaban silenciadas.",
+      confirmLabel: paused ? "Pausar todo" : "Reanudar todo",
+      danger: paused,
+    });
+    if (!ok) return;
+    try {
+      await api.post("/conversations/bulk-bot-pause", { paused });
+      await loadConvs();
+    } catch (e) {
+      showError(e);
     }
   };
 
@@ -234,6 +361,47 @@ export default function Inbox() {
 
   const stages: StageT[] = pipelines.flatMap((p) => p.stages);
 
+  const testCount = convs.filter((c) => c.account.isTest).length;
+  const visibleConvs = showTest ? convs : convs.filter((c) => !c.account.isTest);
+  const groups = groupConversations(visibleConvs, view, users);
+  const activeGroup = groupFilter && groups?.some((g) => g.key === groupFilter) ? groupFilter : null;
+  const shownGroups = groups ? (activeGroup ? groups.filter((g) => g.key === activeGroup) : groups) : null;
+
+  const renderConvItem = (c: Conv, keyPrefix = "") => {
+    const display = c.contact.profileName || c.contact.waId;
+    return (
+      <div
+        key={`${keyPrefix}${c.id}`}
+        className={`conv-item ${selectedId === c.id ? "selected" : ""}`}
+        onClick={() => open(c)}
+      >
+        <div className="conv-avatar" aria-hidden>
+          {display.charAt(0).toUpperCase()}
+        </div>
+        <div className="conv-main">
+          <div className="top">
+            <span className="name">{display}</span>
+            {c.unreadCount > 0 && <span className="badge">{c.unreadCount}</span>}
+          </div>
+          <div className="preview">{c.lastMessagePreview || "—"}</div>
+          <div className="row" style={{ marginTop: 5, gap: 4 }}>
+            <span className="pill">{c.account.name}</span>
+            <span className={`pill ${c.windowOpen ? "green" : "red"}`}>
+              {c.windowOpen ? "24h abierta" : "24h cerrada"}
+            </span>
+            {c.account.isTest && <span className="pill yellow">test</span>}
+            {c.leadId && <span className="pill yellow">lead</span>}
+          </div>
+          {c.tags.length > 0 && (
+            <div className="tag-row">
+              {c.tags.map((t) => <TagChip key={t.id} tag={t} />)}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="inbox">
       {/* Lista */}
@@ -262,37 +430,74 @@ export default function Inbox() {
             label="No leídas"
           />
         </div>
-        <div className="pane-body">
-          {convs.map((c) => {
-            const display = c.contact.profileName || c.contact.waId;
-            return (
-              <div
-                key={c.id}
-                className={`conv-item ${selectedId === c.id ? "selected" : ""}`}
-                onClick={() => open(c)}
+
+        {(testCount > 0 || can("conversations:bulk_pause")) && (
+          <div className="pane-head" style={{ borderTop: "none" }}>
+            {testCount > 0 && (
+              <button className={showTest ? "primary" : ""} onClick={() => setShowTest((v) => !v)}>
+                {showTest ? "Ocultar cuentas de prueba" : `Mostrar cuentas de prueba (${testCount})`}
+              </button>
+            )}
+            {can("conversations:bulk_pause") && (
+              <>
+                <div className="spacer" style={{ flex: 1 }} />
+                <button className="btn-icon-label" title="Silenciar el bot en todas las conversaciones"
+                        onClick={() => bulkBotPause(true)}>
+                  ⏸ Pausar todos
+                </button>
+                <button className="btn-icon-label" title="Reactivar el bot en todas las conversaciones"
+                        onClick={() => bulkBotPause(false)}>
+                  ▶ Reanudar todos
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        <div className="tabs" style={{ margin: "0 12px" }}>
+          {VIEWS.map((v) => (
+            <button key={v.key} className={view === v.key ? "on" : ""} onClick={() => changeView(v.key)}>
+              {v.label}
+            </button>
+          ))}
+        </div>
+
+        {groups && groups.length > 0 && (
+          <div className="group-filter">
+            <button className={`group-chip ${!activeGroup ? "group-chip--active" : ""}`} onClick={() => changeGroupFilter(null)}>
+              Todos <span className="group-chip__count">{visibleConvs.length}</span>
+            </button>
+            {groups.map((g) => (
+              <button
+                key={g.key}
+                className={`group-chip ${activeGroup === g.key ? "group-chip--active" : ""}`}
+                onClick={() => changeGroupFilter(g.key)}
               >
-                <div className="conv-avatar" aria-hidden>
-                  {display.charAt(0).toUpperCase()}
+                {view === "tag" && <span className="group-chip__dot" style={{ background: g.color || "var(--text-muted)" }} />}
+                {g.label} <span className="group-chip__count">{g.items.length}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="pane-body">
+          {!shownGroups && visibleConvs.map((c) => renderConvItem(c))}
+          {shownGroups && shownGroups.map((g) => (
+            <div key={g.key}>
+              {!activeGroup && (
+                <div className="conv-group__header">
+                  {view === "tag" && <span className="conv-group__dot" style={{ background: g.color || "var(--text-muted)" }} />}
+                  {g.label} <span className="group-chip__count">{g.items.length}</span>
                 </div>
-                <div className="conv-main">
-                  <div className="top">
-                    <span className="name">{display}</span>
-                    {c.unreadCount > 0 && <span className="badge">{c.unreadCount}</span>}
-                  </div>
-                  <div className="preview">{c.lastMessagePreview || "—"}</div>
-                  <div className="row" style={{ marginTop: 5, gap: 4 }}>
-                    <span className="pill">{c.account.name}</span>
-                    <span className={`pill ${c.windowOpen ? "green" : "red"}`}>
-                      {c.windowOpen ? "24h abierta" : "24h cerrada"}
-                    </span>
-                    {c.account.isTest && <span className="pill yellow">test</span>}
-                    {c.leadId && <span className="pill yellow">lead</span>}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          {convs.length === 0 && <p className="muted" style={{ padding: 16 }}>Sin conversaciones.</p>}
+              )}
+              {g.items.map((c) => renderConvItem(c, `${g.key}:`))}
+            </div>
+          ))}
+          {visibleConvs.length === 0 && (
+            <p className="muted" style={{ padding: 16 }}>
+              {convs.length === 0 ? "Sin conversaciones." : "No hay chats para mostrar."}
+            </p>
+          )}
         </div>
       </div>
 
@@ -324,21 +529,37 @@ export default function Inbox() {
               )}
               <div className="spacer" style={{ flex: 1 }} />
               {can("conversations:assign") && (
-                <Select
-                  style={{ width: 160 }}
-                  value={selected.assignedUserId ?? ""}
-                  onChange={assign}
-                  options={[
-                    { value: "", label: "Sin asignar" },
-                    ...users.map((u) => ({ value: u.id, label: u.name })),
-                  ]}
-                />
+                <>
+                  <Select
+                    style={{ width: 160 }}
+                    value={selected.assignedUserId ?? ""}
+                    onChange={assign}
+                    options={[
+                      { value: "", label: "Sin asignar" },
+                      ...users.map((u) => ({ value: u.id, label: u.name })),
+                    ]}
+                  />
+                  {selected.assignedUserId !== me?.id && (
+                    <button onClick={() => assign(me!.id)} title="Asignarme esta conversación">Asignarme</button>
+                  )}
+                </>
               )}
               {can("conversations:close") && selected.status !== "closed" && (
                 <button onClick={() => setStatus("closed")}>Cerrar</button>
               )}
               {selected.status === "closed" && <button onClick={() => setStatus("open")}>Reabrir</button>}
             </div>
+            {can("conversations:tag") && (
+              <div className="pane-head" style={{ borderTop: "none", paddingTop: 0 }}>
+                {selected.tags.map((t) => <TagChip key={t.id} tag={t} />)}
+                <TagPicker
+                  conversationId={selected.id}
+                  activeTags={selected.tags}
+                  canManage={can("tags:manage")}
+                  onChanged={loadConvs}
+                />
+              </div>
+            )}
             <div className="msgs">
               {msgs.map((m) => (
                 <div key={m.id} className={`bubble ${m.direction === "inbound" ? "in" : "out"}`}>
@@ -366,15 +587,19 @@ export default function Inbox() {
                           </>
                         )}
                       </div>
+                    ) : a.downloadStatus !== "done" ? (
+                      <div key={a.id} style={{ marginTop: 6 }}>
+                        <span className="muted">📎 {a.mimeType} ({a.downloadStatus})</span>
+                      </div>
+                    ) : a.mimeType.startsWith("image/") ? (
+                      <AttachmentImage key={a.id} id={a.id} fileName={a.fileName} />
+                    ) : a.mimeType === "application/pdf" ? (
+                      <AttachmentPdf key={a.id} id={a.id} fileName={a.fileName} />
                     ) : (
                       <div key={a.id} style={{ marginTop: 6 }}>
-                        {a.downloadStatus === "done" ? (
-                          <a href={`/api/v1/attachments/${a.id}/download`} target="_blank" rel="noopener noreferrer">
-                            📎 {a.fileName || a.mimeType}
-                          </a>
-                        ) : (
-                          <span className="muted">📎 {a.mimeType} ({a.downloadStatus})</span>
-                        )}
+                        <a href={`/api/v1/attachments/${a.id}/download`} target="_blank" rel="noopener noreferrer">
+                          📎 {a.fileName || a.mimeType}
+                        </a>
                       </div>
                     )
                   )}
@@ -439,15 +664,28 @@ export default function Inbox() {
                   {n.body}
                   <div className="meta">
                     <span>{n.authorSource === "n8n_webhook" ? "n8n" : n.authorUserId === me?.id ? "vos" : "equipo"}</span>
-                    <a
-                      href="#"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        editNote(n);
-                      }}
-                    >
-                      editar
-                    </a>
+                    <span className="row" style={{ gap: 8 }}>
+                      <a
+                        href="#"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          editNote(n);
+                        }}
+                      >
+                        editar
+                      </a>
+                      {(n.authorUserId === me?.id || can("notes:edit:any")) && (
+                        <a
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            deleteNote(n);
+                          }}
+                        >
+                          borrar
+                        </a>
+                      )}
+                    </span>
                   </div>
                 </div>
               ))}
@@ -481,7 +719,10 @@ export default function Inbox() {
             value: "",
             currency: "ARS",
             notes: "",
+            custom: {},
           }}
+          customFields={customFields}
+          onAnalyze={can("leads:write") ? analyzeConversation : undefined}
           onCancel={() => setShowCreateLead(false)}
           onSubmit={createLead}
         />

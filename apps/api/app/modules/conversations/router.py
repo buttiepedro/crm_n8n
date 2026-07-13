@@ -17,10 +17,12 @@ from app.db.models import (
     Attachment,
     Contact,
     Conversation,
+    ConversationTag,
     Lead,
     Message,
     Note,
     PipelineStage,
+    Tag,
     User,
     WhatsAppAccount,
 )
@@ -39,7 +41,8 @@ router = APIRouter(tags=["crm"])
 # ── Serializadores ─────────────────────────────────────────────────────────
 
 def _conversation_row(c: Conversation, contact: Contact, account: WhatsAppAccount,
-                      last_body: str | None, lead_id: uuid.UUID | None) -> dict:
+                      last_body: str | None, lead_id: uuid.UUID | None,
+                      tags: list[Tag] | None = None) -> dict:
     return {
         "id": str(c.id),
         "status": c.status.value,
@@ -53,7 +56,26 @@ def _conversation_row(c: Conversation, contact: Contact, account: WhatsAppAccoun
         "windowOpen": is_window_open(c.last_inbound_at),
         "botPaused": c.bot_paused,
         "leadId": str(lead_id) if lead_id else None,
+        "tags": [{"id": str(t.id), "name": t.name, "color": t.color} for t in (tags or [])],
     }
+
+
+async def _tags_by_conversation(
+    db: AsyncSession, conversation_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[Tag]]:
+    """Una sola query para toda la página de conversaciones, evita N+1."""
+    if not conversation_ids:
+        return {}
+    rows = (await db.execute(
+        sa.select(ConversationTag.conversation_id, Tag)
+        .join(Tag, ConversationTag.tag_id == Tag.id)
+        .where(ConversationTag.conversation_id.in_(conversation_ids))
+        .order_by(Tag.name)
+    )).all()
+    out: dict[uuid.UUID, list[Tag]] = {}
+    for conversation_id, tag in rows:
+        out.setdefault(conversation_id, []).append(tag)
+    return out
 
 
 def _message_row(m: Message, attachments: list[Attachment]) -> dict:
@@ -140,10 +162,12 @@ async def list_conversations(
         stmt = stmt.where(Conversation.last_message_at < before)
 
     rows = (await db.execute(stmt)).all()
+    tags_by_conv = await _tags_by_conversation(db, [conv.id for conv, _, _, _ in rows])
     items = []
     for conv, contact, account, body in rows:
         lead_id = await _active_lead_id(db, conv.id)
-        items.append(_conversation_row(conv, contact, account, body, lead_id))
+        items.append(_conversation_row(conv, contact, account, body, lead_id,
+                                       tags_by_conv.get(conv.id)))
     return {"items": items}
 
 
@@ -159,7 +183,8 @@ async def get_conversation(
     contact = await db.get(Contact, conv.contact_id)
     account = await db.get(WhatsAppAccount, conv.whatsapp_account_id)
     lead_id = await _active_lead_id(db, conv.id)
-    data = _conversation_row(conv, contact, account, None, lead_id)
+    tags = (await _tags_by_conversation(db, [conv.id])).get(conv.id)
+    data = _conversation_row(conv, contact, account, None, lead_id, tags)
     data["lastInboundAt"] = conv.last_inbound_at.isoformat() if conv.last_inbound_at else None
     return data
 
@@ -257,6 +282,64 @@ async def patch_conversation(
                     entity_id=conv.id,
                     metadata=body.model_dump(mode="json", exclude_none=True))
     await db.commit()
+    return {"ok": True}
+
+
+class BulkBotPauseIn(CamelModel):
+    paused: bool
+
+
+@router.post("/conversations/bulk-bot-pause")
+async def bulk_bot_pause(
+    body: BulkBotPauseIn,
+    auth: AuthContext = Depends(require_permissions(perms.CONVERSATIONS_BULK_PAUSE)),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    result = await db.execute(
+        sa.update(Conversation).values(bot_paused=body.paused)
+    )
+    await log_event(db, actor_type="user", actor_id=auth.user.id,
+                    action="conversation.bulk_bot_paused", entity_type="conversation",
+                    metadata={"paused": body.paused, "count": result.rowcount})
+    await db.commit()
+    return {"ok": True, "count": result.rowcount}
+
+
+# ── Tags de conversación ────────────────────────────────────────────────────
+
+class ConversationTagIn(CamelModel):
+    tag_id: uuid.UUID
+
+
+@router.post("/conversations/{conversation_id}/tags", status_code=201)
+async def add_conversation_tag(
+    conversation_id: uuid.UUID,
+    body: ConversationTagIn,
+    auth: AuthContext = Depends(require_permissions(perms.CONVERSATIONS_TAG)),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    if await db.get(Conversation, conversation_id) is None:
+        raise NotFoundError("Conversación no encontrada")
+    if await db.get(Tag, body.tag_id) is None:
+        raise NotFoundError("Tag inexistente")
+    exists = await db.get(ConversationTag, (conversation_id, body.tag_id))
+    if exists is None:
+        db.add(ConversationTag(conversation_id=conversation_id, tag_id=body.tag_id))
+        await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/conversations/{conversation_id}/tags/{tag_id}")
+async def remove_conversation_tag(
+    conversation_id: uuid.UUID,
+    tag_id: uuid.UUID,
+    auth: AuthContext = Depends(require_permissions(perms.CONVERSATIONS_TAG)),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    link = await db.get(ConversationTag, (conversation_id, tag_id))
+    if link is not None:
+        await db.delete(link)
+        await db.commit()
     return {"ok": True}
 
 

@@ -1,5 +1,6 @@
 """API de leads y embudo configurable (pipelines/etapas) del CRM."""
 
+import re
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -15,6 +16,7 @@ from app.db.models import (
     Contact,
     Conversation,
     Lead,
+    LeadFieldDefinition,
     LeadStageEvent,
     Note,
     Pipeline,
@@ -25,6 +27,7 @@ from app.db.session import get_db
 from app.modules.audit.service import log_event
 from app.modules.auth import permissions as perms
 from app.modules.auth.deps import AuthContext, require_permissions
+from app.modules.leads.ai_suggest import suggest_lead_fields
 from app.schemas.hooks import CamelModel
 
 router = APIRouter(tags=["leads"])
@@ -62,6 +65,19 @@ def _lead_row(lead: Lead, contact: Contact | None = None, notes: list[str] | Non
         "createdAt": lead.created_at.isoformat(),
         "updatedAt": lead.updated_at.isoformat(),
     }
+
+
+def _field_def_row(f: LeadFieldDefinition) -> dict:
+    return {"id": str(f.id), "key": f.key, "label": f.label, "type": f.type,
+            "options": f.options}
+
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _slugify(label: str) -> str:
+    slug = _SLUG_RE.sub("_", label.strip().lower()).strip("_")
+    return slug or "campo"
 
 
 async def _renumber_stages(db: AsyncSession, pipeline_id: uuid.UUID) -> None:
@@ -240,7 +256,87 @@ async def delete_stage(
     return {"ok": True}
 
 
+# ── Campos custom de lead ───────────────────────────────────────────────────
+
+@router.get("/lead-field-definitions")
+async def list_field_definitions(
+    auth: AuthContext = Depends(require_permissions(perms.LEADS_READ)),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    defs = (await db.execute(
+        sa.select(LeadFieldDefinition).order_by(LeadFieldDefinition.created_at)
+    )).scalars().all()
+    return {"items": [_field_def_row(f) for f in defs]}
+
+
+class FieldDefinitionIn(CamelModel):
+    label: str
+    type: str  # 'text' | 'number' | 'date' | 'select'
+    options: list[str] | None = None
+
+
+@router.post("/lead-field-definitions", status_code=201)
+async def create_field_definition(
+    body: FieldDefinitionIn,
+    auth: AuthContext = Depends(require_permissions(perms.PIPELINES_MANAGE)),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    if body.type not in {"text", "number", "date", "select"}:
+        raise ConflictError("Tipo de campo inválido")
+    base_key = _slugify(body.label)
+    key = base_key
+    suffix = 2
+    while (await db.execute(
+        sa.select(LeadFieldDefinition.id).where(LeadFieldDefinition.key == key)
+    )).scalar_one_or_none():
+        key = f"{base_key}_{suffix}"
+        suffix += 1
+    field = LeadFieldDefinition(
+        key=key, label=body.label.strip(), type=body.type,
+        options=body.options if body.type == "select" else None,
+    )
+    db.add(field)
+    await db.flush()
+    await log_event(db, actor_type="user", actor_id=auth.user.id,
+                    action="lead_field_definition.created", entity_type="lead_field_definition",
+                    entity_id=field.id, metadata={"key": key})
+    await db.commit()
+    return _field_def_row(field)
+
+
+@router.delete("/lead-field-definitions/{field_id}")
+async def delete_field_definition(
+    field_id: uuid.UUID,
+    auth: AuthContext = Depends(require_permissions(perms.PIPELINES_MANAGE)),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    field = await db.get(LeadFieldDefinition, field_id)
+    if field is None:
+        raise NotFoundError("Campo inexistente")
+    await db.delete(field)
+    await log_event(db, actor_type="user", actor_id=auth.user.id,
+                    action="lead_field_definition.deleted", entity_type="lead_field_definition",
+                    entity_id=field_id)
+    await db.commit()
+    return {"ok": True}
+
+
 # ── Leads ──────────────────────────────────────────────────────────────────
+
+class AnalyzeConversationIn(CamelModel):
+    conversation_id: uuid.UUID
+
+
+@router.post("/leads/analyze-conversation")
+async def analyze_conversation(
+    body: AnalyzeConversationIn,
+    auth: AuthContext = Depends(require_permissions(perms.LEADS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    if await db.get(Conversation, body.conversation_id) is None:
+        raise NotFoundError("Conversación no encontrada")
+    return await suggest_lead_fields(db, body.conversation_id)
+
 
 @router.get("/leads")
 async def list_leads(

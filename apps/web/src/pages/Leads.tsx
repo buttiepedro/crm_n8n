@@ -1,10 +1,12 @@
 /** Embudo de leads: kanban por pipeline con etapas configurables. */
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useNavigate } from "react-router-dom";
 import { api, showError } from "../api";
 import { useAuth } from "../auth";
+import { CustomFieldsAdmin } from "../ui/CustomFieldsAdmin";
 import { Select } from "../ui/Select";
 import { confirmDialog, promptDialog } from "../ui/dialogs";
-import { LeadFormDialog, type LeadFormValues } from "../ui/LeadFormDialog";
+import { LeadFormDialog, type FieldDef, type LeadFormValues } from "../ui/LeadFormDialog";
 
 const ICON = { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -33,6 +35,12 @@ const CloseIcon = () => (
     <line x1="6" y1="6" x2="18" y2="18" />
   </svg>
 );
+const UserIcon = () => (
+  <svg {...ICON} aria-hidden>
+    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+    <circle cx="12" cy="7" r="4" />
+  </svg>
+);
 
 type Stage = {
   id: string;
@@ -45,6 +53,7 @@ type Stage = {
   totalValue: number;
 };
 type Pipeline = { id: string; name: string; isDefault: boolean; stages: Stage[] };
+type UserLite = { id: string; name: string };
 type Lead = {
   id: string;
   title: string;
@@ -56,11 +65,11 @@ type Lead = {
   attributes: Record<string, unknown>;
   contact: { profileName: string | null; waId: string } | null;
   conversationId: string | null;
+  ownerUserId: string | null;
 };
 type LeadHistoryEvent = { fromStageId: string | null; toStageId: string; movedBy: string; at: string };
 type LeadNote = { id: string; body: string; authorSource: string; updatedAt: string };
 type LeadDetail = Omit<Lead, "notes"> & {
-  ownerUserId: string | null;
   createdAt: string;
   updatedAt: string;
   externalKey: string | null;
@@ -99,7 +108,8 @@ function authorLabel(source: string) {
 }
 
 export default function Leads() {
-  const { can } = useAuth();
+  const { can, me } = useAuth();
+  const navigate = useNavigate();
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [pipelineId, setPipelineId] = useState<string>("");
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -109,6 +119,19 @@ export default function Leads() {
   const [detail, setDetail] = useState<LeadDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [editingLead, setEditingLead] = useState<LeadDetail | null>(null);
+  const [users, setUsers] = useState<UserLite[]>([]);
+  const [customFields, setCustomFields] = useState<FieldDef[]>([]);
+  const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
+  const [showFieldsAdmin, setShowFieldsAdmin] = useState(false);
+
+  const loadCustomFields = useCallback(() => {
+    api.get<{ items: FieldDef[] }>("/lead-field-definitions").then((d) => setCustomFields(d.items)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    api.get<{ items: UserLite[] }>("/users").then((d) => setUsers(d.items)).catch(() => {});
+    loadCustomFields();
+  }, [loadCustomFields]);
 
   const load = useCallback(async () => {
     try {
@@ -142,6 +165,27 @@ export default function Leads() {
     });
     return map;
   }, [pipeline]);
+
+  const NO_OWNER = "__none__";
+  const ownerName = (id: string | null) => (id ? users.find((u) => u.id === id)?.name || "…" : null);
+  // Grupos por dueño derivados de los leads cargados: solo aparece quien tiene
+  // leads; "Sin dueño" va último. La selección recordada cae a "Todos" si
+  // quedó sin leads (mismo criterio que el filtro por etapa).
+  const ownerGroups = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const l of leads) counts.set(l.ownerUserId || NO_OWNER, (counts.get(l.ownerUserId || NO_OWNER) || 0) + 1);
+    const arr = [...counts.entries()]
+      .filter(([k]) => k !== NO_OWNER)
+      .map(([k, n]) => ({ key: k, label: ownerName(k) || "…", count: n }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    if (counts.has(NO_OWNER)) arr.push({ key: NO_OWNER, label: "Sin dueño", count: counts.get(NO_OWNER)! });
+    return arr;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leads, users]);
+  const activeOwner = ownerFilter && ownerGroups.some((g) => g.key === ownerFilter) ? ownerFilter : null;
+  const visibleLeads = activeOwner
+    ? leads.filter((l) => (l.ownerUserId || NO_OWNER) === activeOwner)
+    : leads;
 
   const move = async (lead: LeadRef, stageId: string) => {
     if (lead.stageId === stageId) return;
@@ -188,7 +232,7 @@ export default function Leads() {
 
   const saveLeadEdit = async (values: LeadFormValues) => {
     if (!editingLead) return;
-    const attributes: Record<string, string> = { company: values.company.trim(), priority: values.priority };
+    const attributes: Record<string, string> = { ...values.custom, company: values.company.trim(), priority: values.priority };
     try {
       await api.patch(`/leads/${editingLead.id}`, {
         title: values.title.trim(),
@@ -205,6 +249,20 @@ export default function Leads() {
       showError(e);
       throw e;
     }
+  };
+
+  const assignOwner = async (leadId: string, ownerUserId: string) => {
+    try {
+      await api.patch(`/leads/${leadId}`, { ownerUserId: ownerUserId || null });
+      setDetail((d) => (d && d.id === leadId ? { ...d, ownerUserId: ownerUserId || null } : d));
+      await load();
+    } catch (e) {
+      showError(e);
+    }
+  };
+
+  const goToConversation = (conversationId: string) => {
+    navigate(`/?conversationId=${conversationId}`);
   };
 
   const removeLead = async (lead: LeadRef) => {
@@ -298,11 +356,33 @@ export default function Leads() {
             <PlusIcon /> Etapa
           </button>
         )}
+        {can("pipelines:manage") && (
+          <button className="btn-icon-label" onClick={() => setShowFieldsAdmin(true)}>
+            ⚙ Campos
+          </button>
+        )}
       </div>
+
+      {ownerGroups.length > 0 && (
+        <div className="group-filter" style={{ padding: "0 0 16px", border: "none" }}>
+          <button className={`group-chip ${!activeOwner ? "group-chip--active" : ""}`} onClick={() => setOwnerFilter(null)}>
+            Todos <span className="group-chip__count">{leads.length}</span>
+          </button>
+          {ownerGroups.map((g) => (
+            <button
+              key={g.key}
+              className={`group-chip ${activeOwner === g.key ? "group-chip--active" : ""}`}
+              onClick={() => setOwnerFilter(g.key)}
+            >
+              {g.label} <span className="group-chip__count">{g.count}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="kanban">
         {pipeline?.stages.map((s, si) => {
-          const stageLeads = leads.filter((l) => l.stageId === s.id);
+          const stageLeads = visibleLeads.filter((l) => l.stageId === s.id);
           const total = stageLeads.reduce((acc, l) => acc + (l.value != null ? Number(l.value) : 0), 0);
           const color = stageColorMap[s.id] || STAGE_COLORS[si % STAGE_COLORS.length];
           const isOver = overStage === s.id && dragLead != null && dragLead.stageId !== s.id;
@@ -383,7 +463,7 @@ export default function Leads() {
                         </div>
                       </div>
                       {company && <div className="kcard-company">{company}</div>}
-                      {(l.value != null || l.source === "n8n_webhook" || priority) && (
+                      {(l.value != null || l.source === "n8n_webhook" || priority || l.ownerUserId) && (
                         <div className="kcard-foot">
                           {l.value != null && (
                             <span className="kcard-value">
@@ -392,6 +472,9 @@ export default function Leads() {
                           )}
                           {priority && <span className={PRIORITY_PILL_CLASS[priority]}>{PRIORITY_LABEL[priority]}</span>}
                           {l.source === "n8n_webhook" && <span className="pill">n8n</span>}
+                          {l.ownerUserId && (
+                            <span className="pill pill-owner"><UserIcon /> {ownerName(l.ownerUserId)}</span>
+                          )}
                         </div>
                       )}
                     </div>
@@ -413,6 +496,9 @@ export default function Leads() {
           loading={detailLoading}
           stageColorMap={stageColorMap}
           stages={pipeline?.stages ?? []}
+          users={users}
+          customFields={customFields}
+          meId={me?.id ?? null}
           canMoveStage={canDrag}
           canEdit={can("leads:write")}
           canDelete={can("leads:delete")}
@@ -420,6 +506,8 @@ export default function Leads() {
           onMoveStage={(stageId) => detail && move(detail, stageId)}
           onEdit={() => detail && startEdit(detail)}
           onDelete={() => detail && removeLead(detail)}
+          onAssignOwner={(userId) => detail && assignOwner(detail.id, userId)}
+          onGoToConversation={goToConversation}
         />
       )}
 
@@ -428,6 +516,7 @@ export default function Leads() {
           mode="edit"
           contact={editingLead.contact}
           stages={pipeline?.stages ?? []}
+          customFields={customFields}
           initial={{
             title: editingLead.title,
             company: getCompany(editingLead.attributes) ?? "",
@@ -436,10 +525,17 @@ export default function Leads() {
             value: editingLead.value != null ? String(editingLead.value) : "",
             currency: editingLead.currency ?? "ARS",
             notes: "",
+            custom: Object.fromEntries(
+              customFields.map((f) => [f.key, String(editingLead.attributes[f.key] ?? "")]),
+            ),
           }}
           onCancel={() => setEditingLead(null)}
           onSubmit={saveLeadEdit}
         />
+      )}
+
+      {showFieldsAdmin && (
+        <CustomFieldsAdmin onClose={() => setShowFieldsAdmin(false)} onChanged={loadCustomFields} />
       )}
     </div>
   );
@@ -450,6 +546,9 @@ function LeadDetailModal({
   loading,
   stageColorMap,
   stages,
+  users,
+  customFields,
+  meId,
   canMoveStage,
   canEdit,
   canDelete,
@@ -457,11 +556,16 @@ function LeadDetailModal({
   onMoveStage,
   onEdit,
   onDelete,
+  onAssignOwner,
+  onGoToConversation,
 }: {
   lead: LeadDetail | null;
   loading: boolean;
   stageColorMap: Record<string, string>;
   stages: Stage[];
+  users: UserLite[];
+  customFields: FieldDef[];
+  meId: string | null;
   canMoveStage: boolean;
   canEdit: boolean;
   canDelete: boolean;
@@ -469,6 +573,8 @@ function LeadDetailModal({
   onMoveStage: (stageId: string) => void;
   onEdit: () => void;
   onDelete: () => void;
+  onAssignOwner: (userId: string) => void;
+  onGoToConversation: (conversationId: string) => void;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -487,6 +593,7 @@ function LeadDetailModal({
   const priority = getPriority(lead?.attributes);
   const currentStageColor = lead ? stageColorMap[lead.stageId] : undefined;
   const HIDDEN_ATTR_KEYS = ["company", "empresa", "Company", "Empresa", "priority"];
+  const fieldLabel = (key: string) => customFields.find((f) => f.key === key)?.label ?? key;
   const extraAttrs = lead
     ? Object.entries(lead.attributes).filter(
         ([k, v]) => !HIDDEN_ATTR_KEYS.includes(k) && v != null && v !== ""
@@ -541,6 +648,31 @@ function LeadDetailModal({
                 </section>
               )}
 
+              {canEdit && (
+                <section className="lead-modal-section">
+                  <h4>Dueño</h4>
+                  <div className="row" style={{ gap: 6 }}>
+                    <Select
+                      style={{ flex: 1 }}
+                      value={lead.ownerUserId ?? ""}
+                      onChange={onAssignOwner}
+                      options={[{ value: "", label: "Sin dueño" }, ...users.map((u) => ({ value: u.id, label: u.name }))]}
+                    />
+                    {lead.ownerUserId !== meId && (
+                      <button onClick={() => onAssignOwner(meId!)} title="Asignarme este lead">Asignarme</button>
+                    )}
+                  </div>
+                </section>
+              )}
+
+              {lead.conversationId && (
+                <section className="lead-modal-section">
+                  <button className="btn-icon-label" onClick={() => onGoToConversation(lead.conversationId!)}>
+                    Ver conversación →
+                  </button>
+                </section>
+              )}
+
               <section className="lead-modal-section">
                 <h4>Notas</h4>
                 {lead.notes.length === 0 ? (
@@ -569,7 +701,7 @@ function LeadDetailModal({
                   )}
                   {extraAttrs.map(([k, v]) => (
                     <div key={k}>
-                      <span className="muted">{k}</span>
+                      <span className="muted">{fieldLabel(k)}</span>
                       <div>{String(v)}</div>
                     </div>
                   ))}

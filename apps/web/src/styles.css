@@ -1049,3 +1049,219 @@ code.k {
 }
 .audio-seek::-moz-range-track { background: var(--border-strong); height: 4px; border-radius: 999px; }
 .audio-time { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ══ Botón ícono genérico (notas, tags, lightbox) ══════════════════════ */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  padding: 7px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.icon-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ══ Tags de conversación ══════════════════════════════════════════════ */
+.tag-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 2px 9px 2px 7px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.tag-chip__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tag-color, var(--text-muted)); flex-shrink: 0; }
+.tag-chip__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  padding: 1px;
+  margin-left: 1px;
+  color: inherit;
+  opacity: .6;
+  border-radius: 50%;
+}
+.tag-chip__remove:hover { opacity: 1; background: rgba(0,0,0,.08); }
+
+.tag-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px dashed var(--border-strong);
+  background: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px 2px 6px;
+  border-radius: 999px;
+}
+.tag-add-btn:hover { border-color: var(--color-primary); color: var(--color-primary); background: var(--accent-dim); }
+
+.tag-picker-popover { width: 230px; padding: 8px; }
+.tag-picker-list { max-height: 200px; overflow-y: auto; margin-bottom: 6px; }
+.tag-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.tag-picker-item:hover { background: var(--bg-hover); }
+.tag-picker-item .tag-chip__dot { width: 9px; height: 9px; }
+.tag-picker-item.checked { font-weight: 600; }
+.tag-picker-item .check-space { margin-left: auto; color: var(--color-primary); display: flex; }
+.tag-picker-empty { padding: 7px 8px; font-size: 12.5px; color: var(--text-muted); }
+.tag-picker-new { border-top: 1px solid var(--border); padding-top: 8px; display: flex; flex-direction: column; gap: 7px; }
+.tag-picker-new input { font-size: 13px; padding: 6px 9px; }
+.tag-swatches { display: flex; flex-wrap: wrap; gap: 5px; }
+.tag-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.tag-swatch.selected { border-color: var(--text-primary); box-shadow: 0 0 0 2px var(--bg-card); }
+
+/* ══ Vistas agrupadas del inbox (por persona / por tag) ════════════════ */
+.group-filter { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+.group-chip:hover { border-color: var(--border-strong); }
+.group-chip--active { background: var(--accent-dim); border-color: var(--color-primary); color: var(--color-primary); }
+.group-chip__dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.group-chip__count { font-variant-numeric: tabular-nums; opacity: .75; }
+.conv-group__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.conv-group__dot { width: 7px; height: 7px; border-radius: 50%; }
+
+/* ══ Adjuntos ricos: imagen (lightbox) + PDF inline ═══════════════════ */
+.att-img-thumb {
+  display: block;
+  max-width: 220px;
+  max-height: 220px;
+  border-radius: var(--radius-sm);
+  margin-top: 6px;
+  cursor: zoom-in;
+  object-fit: cover;
+}
+.lightbox-content { position: relative; display: flex; max-width: 92vw; max-height: 92vh; }
+.lightbox-content img { max-width: 92vw; max-height: 92vh; border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); }
+.lightbox-close { position: fixed; top: 20px; right: 20px; background: rgba(0,0,0,.35); color: #fff; }
+.lightbox-close:hover { background: rgba(0,0,0,.55); }
+
+.att-pdf {
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  overflow: hidden;
+  max-width: 320px;
+}
+.bubble.out .att-pdf { border-color: rgba(255,255,255,.35); }
+.att-pdf__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 0;
+  background: var(--bg-subtle);
+  color: inherit;
+  text-align: left;
+}
+.att-pdf__bar:hover { background: var(--bg-hover); }
+.bubble.out .att-pdf__bar { background: rgba(255,255,255,.12); color: #fff; }
+.bubble.out .att-pdf__bar:hover { background: rgba(255,255,255,.2); }
+.att-pdf__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: inherit;
+}
+.att-pdf__frame { width: 100%; height: 360px; border: none; border-top: 1px solid var(--border); }
+
+/* ══ Panel de campos custom de lead ════════════════════════════════════ */
+.fields-admin-modal { width: 480px; }
+.field-def-list { margin: 4px 0 16px; }
+.field-def-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.field-def-row:last-child { border-bottom: none; }
+.field-def-label { flex: 1; font-weight: 600; }
+.field-def-type { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+.field-def-empty { padding: 16px 2px; color: var(--text-muted); font-size: 13px; }
+.field-def-new.form-grid { grid-template-columns: 1fr; margin: 0; padding-top: 14px; border-top: 1px solid var(--border); }
+
+/* ══ Análisis de IA en el form de lead ══════════════════════════════════ */
+.ai-analyze-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  margin-bottom: 14px;
+  background: var(--accent-dim);
+  border: 1px dashed var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 700;
+}
+.ai-analyze-btn:hover { background: var(--accent-ring); }
+.ai-analyzed-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-success-text);
+  background: var(--color-success-bg);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  margin-bottom: 14px;
+}

@@ -21,6 +21,7 @@ from app.modules.conversations.router import router as conversations_router
 from app.modules.health.router import router as health_router
 from app.modules.hooks.router import router as hooks_router
 from app.modules.leads.router import router as leads_router
+from app.modules.tags.router import router as tags_router
 from app.modules.task_handlers import register_task_handlers
 from app.modules.whatsapp.router import router as whatsapp_router
 
@@ -87,6 +88,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(conversations_router, prefix="/api/v1")
     app.include_router(leads_router, prefix="/api/v1")
+    app.include_router(tags_router, prefix="/api/v1")
     app.include_router(config_router, prefix="/api/v1")
     app.include_router(analytics_router, prefix="/api/v1")
     return app

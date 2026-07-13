@@ -129,3 +129,18 @@ class Note(UUIDPkMixin, TimestampedMixin, Base):
         NoteAuthorSourceType, nullable=False, default=NoteAuthorSource.user
     )
     deleted_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+
+
+class LeadFieldDefinition(UUIDPkMixin, CreatedAtMixin, Base):
+    """Campo custom definido por un admin y renderizado en el form de leads.
+    El valor vive en Lead.attributes[key] — esta tabla solo define el esquema."""
+
+    __tablename__ = "lead_field_definitions"
+    __table_args__ = (
+        sa.CheckConstraint("type IN ('text', 'number', 'date', 'select')", name="ck_field_def_type"),
+    )
+
+    key: Mapped[str] = mapped_column(sa.Text, unique=True, nullable=False)
+    label: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    type: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    options: Mapped[list | None] = mapped_column(JSONB)  # solo si type == "select"
