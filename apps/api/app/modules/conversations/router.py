@@ -55,6 +55,7 @@ def _conversation_row(c: Conversation, contact: Contact, account: WhatsAppAccoun
         "unreadCount": c.unread_count,
         "windowOpen": is_window_open(c.last_inbound_at),
         "botPaused": c.bot_paused,
+        "botPausedByGlobal": c.bot_paused_by_global,
         "leadId": str(lead_id) if lead_id else None,
         "tags": [{"id": str(t.id), "name": t.name, "color": t.color} for t in (tags or [])],
     }
@@ -276,6 +277,9 @@ async def patch_conversation(
         if not auth.has(perms.CONVERSATIONS_SEND):
             raise ForbiddenError("Sin permiso para silenciar el bot")
         conv.bot_paused = body.bot_paused
+        # Acción manual sobre esta conversación puntual: ya no es "pausada
+        # por el global", así que "reanudar todos" no debe tocarla.
+        conv.bot_paused_by_global = False
 
     await log_event(db, actor_type="user", actor_id=auth.user.id,
                     action="conversation.updated", entity_type="conversation",
@@ -295,9 +299,25 @@ async def bulk_bot_pause(
     auth: AuthContext = Depends(require_permissions(perms.CONVERSATIONS_BULK_PAUSE)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    result = await db.execute(
-        sa.update(Conversation).values(bot_paused=body.paused)
-    )
+    if body.paused:
+        # Silencia todo lo que no esté ya silenciado. Lo que ya estaba
+        # pausado (a mano o por un global anterior) queda como estaba, así
+        # no pisa el origen de una pausa manual existente.
+        stmt = (
+            sa.update(Conversation)
+            .where(Conversation.bot_paused.is_(False))
+            .values(bot_paused=True, bot_paused_by_global=True)
+        )
+    else:
+        # "Dejar pasar": solo reactiva lo que había pausado el global.
+        # Lo que un agente silenció a mano en una conversación puntual
+        # queda silenciado.
+        stmt = (
+            sa.update(Conversation)
+            .where(Conversation.bot_paused_by_global.is_(True))
+            .values(bot_paused=False, bot_paused_by_global=False)
+        )
+    result = await db.execute(stmt)
     await log_event(db, actor_type="user", actor_id=auth.user.id,
                     action="conversation.bulk_bot_paused", entity_type="conversation",
                     metadata={"paused": body.paused, "count": result.rowcount})

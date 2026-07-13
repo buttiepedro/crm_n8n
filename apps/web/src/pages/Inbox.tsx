@@ -23,6 +23,7 @@ type Conv = {
   unreadCount: number;
   windowOpen: boolean;
   botPaused: boolean;
+  botPausedByGlobal: boolean;
   leadId: string | null;
   tags: TagT[];
 };

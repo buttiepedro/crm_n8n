@@ -68,6 +68,13 @@ class Conversation(UUIDPkMixin, TimestampedMixin, Base):
     bot_paused: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, default=False, server_default=sa.text("false")
     )
+    # True si la pausa actual vino del silenciador global (bulk-bot-pause) y
+    # no de un agente silenciando esta conversación puntual. Permite que
+    # "reanudar todos" deje pasar solo lo que el global pausó, sin reactivar
+    # lo que un agente silenció a mano.
+    bot_paused_by_global: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, default=False, server_default=sa.text("false")
+    )
 
 
 class Message(UUIDPkMixin, CreatedAtMixin, Base):

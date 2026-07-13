@@ -31,10 +31,6 @@ const PRIORITY_OPTIONS = [
   { value: "media", label: "Media" },
   { value: "alta", label: "Alta" },
 ];
-const CURRENCY_OPTIONS = [
-  { value: "ARS", label: "ARS" },
-  { value: "USD", label: "USD" },
-];
 
 const CloseIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
@@ -188,23 +184,15 @@ export function LeadFormDialog({
             <Select value={values.stageId} onChange={(v) => set("stageId", v)} options={stages.map((s) => ({ value: s.id, label: s.name }))} />
           </label>
           <label>
-            Valor esperado
-            <div className="row" style={{ gap: 6 }}>
-              <input
-                type="number"
-                inputMode="decimal"
-                style={{ flex: 1 }}
-                value={values.value}
-                onChange={(e) => set("value", e.target.value)}
-                placeholder="0"
-              />
-              <Select
-                style={{ width: 88, flexShrink: 0 }}
-                value={values.currency}
-                onChange={(v) => set("currency", v)}
-                options={CURRENCY_OPTIONS}
-              />
-            </div>
+            Valor esperado (opcional)
+            <input
+              type="number"
+              inputMode="decimal"
+              className="no-spinner"
+              value={values.value}
+              onChange={(e) => set("value", e.target.value)}
+              placeholder="0"
+            />
           </label>
 
           {customFields.map((f) => (
