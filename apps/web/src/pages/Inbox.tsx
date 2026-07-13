@@ -298,13 +298,19 @@ export default function Inbox() {
     }
   };
 
-  const bulkBotPause = async (paused: boolean) => {
+  const globalBotSilenced = convs.some((c) => c.botPausedByGlobal);
+
+  const toggleGlobalBot = async (active: boolean) => {
+    // active = true → bot vuelve a responder ("dejar pasar"); false → silenciador global ON.
+    const paused = !active;
     const ok = await confirmDialog({
-      title: paused ? "Pausar todos los bots" : "Reanudar todos los bots",
+      title: paused ? "Silenciador global" : "Desactivar silenciador global",
       message: paused
-        ? "Esto silencia el bot en TODAS las conversaciones (nadie va a recibir respuesta automática hasta que lo reactives)."
-        : "Esto reactiva el bot en todas las conversaciones que estaban silenciadas.",
-      confirmLabel: paused ? "Pausar todo" : "Reanudar todo",
+        ? "Esto silencia el bot en TODAS las conversaciones que hoy responden automático " +
+          "(nadie va a recibir respuesta hasta que lo desactives)."
+        : "Esto deja pasar al bot de nuevo en las conversaciones que silenció el global. " +
+          "Las que un agente silenció a mano, puntualmente, siguen silenciadas.",
+      confirmLabel: paused ? "Silenciar todo" : "Dejar pasar",
       danger: paused,
     });
     if (!ok) return;
@@ -336,17 +342,19 @@ export default function Inbox() {
     }
   };
 
-  const toggleBot = async () => {
+  const toggleBot = async (active: boolean) => {
     if (!selected) return;
-    const next = !selected.botPaused;
-    if (next && !selected.windowOpen) {
+    const next = !active; // active=false → silenciar
+    if (next) {
       const ok = await confirmDialog({
         title: "Silenciar bot",
-        message:
-          "Ventana de 24h cerrada: el cliente no escribió en las últimas 24h.\n" +
-          "Si silenciás el bot NO vas a poder responder manualmente (WhatsApp solo " +
-          "permite plantillas aprobadas fuera de la ventana) hasta que el cliente " +
-          "vuelva a escribir.\n¿Silenciar igual?",
+        message: !selected.windowOpen
+          ? "Ventana de 24h cerrada: el cliente no escribió en las últimas 24h.\n" +
+            "Si silenciás el bot NO vas a poder responder manualmente (WhatsApp solo " +
+            "permite plantillas aprobadas fuera de la ventana) hasta que el cliente " +
+            "vuelva a escribir.\n¿Silenciar igual?"
+          : "El bot va a dejar de responder automáticamente en esta conversación " +
+            "hasta que lo reactives.\n¿Silenciar igual?",
         confirmLabel: "Silenciar igual",
         danger: true,
       });
@@ -442,14 +450,12 @@ export default function Inbox() {
             {can("conversations:bulk_pause") && (
               <>
                 <div className="spacer" style={{ flex: 1 }} />
-                <button className="btn-icon-label" title="Silenciar el bot en todas las conversaciones"
-                        onClick={() => bulkBotPause(true)}>
-                  ⏸ Pausar todos
-                </button>
-                <button className="btn-icon-label" title="Reactivar el bot en todas las conversaciones"
-                        onClick={() => bulkBotPause(false)}>
-                  ▶ Reanudar todos
-                </button>
+                <Switch
+                  checked={!globalBotSilenced}
+                  onChange={toggleGlobalBot}
+                  label={globalBotSilenced ? "🔇 Bot global silenciado" : "🤖 Bot global activo"}
+                  className="btn-icon-label"
+                />
               </>
             )}
           </div>
@@ -516,17 +522,12 @@ export default function Inbox() {
               <span className="pill">{selected.status}</span>
               {selected.account.isTest && <span className="pill yellow">test</span>}
               {can("conversations:send") && (
-                <button
-                  onClick={toggleBot}
-                  className={selected.botPaused ? "primary" : ""}
-                  title={
-                    selected.botPaused
-                      ? "El bot no responde en esta conversación. Click para reactivarlo."
-                      : "El bot responde automáticamente. Click para silenciarlo y responder vos."
-                  }
-                >
-                  {selected.botPaused ? "🔇 Bot silenciado" : "🤖 Bot activo"}
-                </button>
+                <Switch
+                  checked={!selected.botPaused}
+                  onChange={toggleBot}
+                  label={selected.botPaused ? "🔇 Bot silenciado" : "🤖 Bot activo"}
+                  className="btn-icon-label"
+                />
               )}
               <div className="spacer" style={{ flex: 1 }} />
               {can("conversations:assign") && (
