@@ -385,10 +385,10 @@ async def funnel(
     prev_entered: int | None = None
     for s in stages:
         stage_entered = entered.get(s.id, 0)
-        conversion = (
-            round(stage_entered / prev_entered * 100, 1)
-            if not s.is_terminal and prev_entered else None
-        )
+        # % sobre la última etapa de flujo (ej. "Propuesta") — se calcula para
+        # TODAS las etapas, incluidas las terminales (Ganado/Perdido), para
+        # que se vean con la misma información que el resto.
+        conversion = round(stage_entered / prev_entered * 100, 1) if prev_entered else None
         items.append({
             "id": str(s.id), "name": s.name, "isTerminal": s.is_terminal,
             "outcome": s.outcome, "currentCount": current.get(s.id, 0),

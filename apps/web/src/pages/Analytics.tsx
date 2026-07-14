@@ -264,18 +264,20 @@ function HourBars({ data }: { data: HourPoint[] }) {
 /* ── Embudo del pipeline ────────────────────────────────────────────── */
 
 function FunnelBars({ stages, historic }: { stages: FunnelStage[]; historic: boolean }) {
-  const flow = stages.filter((s) => !s.isTerminal);
-  const terminal = stages.filter((s) => s.isTerminal);
-  const max = Math.max(1, ...flow.map((s) => s.currentCount));
+  const max = Math.max(1, ...stages.map((s) => s.currentCount));
   const countLabel = historic ? "actualmente" : "entraron a la etapa en el período";
+  const barColor = (s: FunnelStage) =>
+    s.outcome === "won" ? "var(--color-success-text)" : s.outcome === "lost" ? "var(--color-danger)" : undefined;
 
   return (
     <div>
-      {flow.map((s) => (
+      {stages.map((s) => (
         <div className="funnel-row" key={s.id} title={`${s.name}: ${s.currentCount} ${countLabel}`}>
-          <span className="funnel-label">{s.name}</span>
+          <span className="funnel-label">
+            {s.outcome === "won" ? "✓ " : s.outcome === "lost" ? "✕ " : ""}{s.name}
+          </span>
           <div className="funnel-track">
-            <div className="funnel-bar" style={{ width: `${Math.max(4, (s.currentCount / max) * 100)}%` }} />
+            <div className="funnel-bar" style={{ width: `${Math.max(4, (s.currentCount / max) * 100)}%`, background: barColor(s) }} />
           </div>
           <span className="funnel-num">
             {nf.format(s.currentCount)}
@@ -285,20 +287,11 @@ function FunnelBars({ stages, historic }: { stages: FunnelStage[]; historic: boo
           </span>
         </div>
       ))}
-      {terminal.length > 0 && (
-        <div className="row" style={{ marginTop: 10, gap: 6 }}>
-          {terminal.map((s) => (
-            <span key={s.id} className={`pill ${s.outcome === "won" ? "green" : "red"}`}>
-              {s.outcome === "won" ? "✓" : "✕"} {s.name}: {nf.format(s.enteredInPeriod)}
-            </span>
-          ))}
-        </div>
-      )}
       <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
         {historic
           ? "Cantidad de leads actualmente en cada etapa (todo el historial)."
           : "Leads que llegaron a su etapa actual dentro del período seleccionado."}
-        {" "}% = conversión desde la etapa anterior (entradas en el período).
+        {" "}% = conversión desde la etapa anterior.
       </p>
     </div>
   );
