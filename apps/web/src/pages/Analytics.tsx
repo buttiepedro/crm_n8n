@@ -13,6 +13,7 @@ type Summary = {
   current: Record<string, number | null>;
   previous: Record<string, number | null>;
   awaitingReply: number;
+  openLeads: number;
 };
 type TsPoint = { date: string; inbound: number; outbound: number; newConversations: number; leadsCreated: number };
 type HourPoint = { hourUtc: number; count: number };
@@ -21,13 +22,9 @@ type FunnelStage = { id: string; name: string; isTerminal: boolean; outcome: str
 
 const nf = new Intl.NumberFormat("es-AR");
 const fmt = (n: number | null | undefined) => (n == null ? "—" : nf.format(n));
-const fmtMin = (m: number | null | undefined) => {
-  if (m == null) return "—";
-  if (m < 1) return "<1 min";
-  if (m < 60) return `${Math.round(m)} min`;
-  return `${Math.floor(m / 60)} h ${Math.round(m % 60)} m`;
-};
 const fmtMoney = (n: number | null | undefined) => (n ? `$ ${nf.format(Math.round(n))}` : "—");
+const conversionHint = (c: Record<string, number | null>) =>
+  c.newConversations ? `${Math.round((c.leadsCreated ?? 0) / c.newConversations * 100)}% de conversión` : undefined;
 
 function niceCeil(v: number): number {
   if (v <= 0) return 1;
@@ -63,7 +60,7 @@ export default function Analytics() {
   }, [days]);
 
   if (!summary) return <div className="page">Cargando…</div>;
-  const { current: c, previous: p } = summary;
+  const { current: c } = summary;
 
   return (
     <div className="page" style={{ maxWidth: 1100 }}>
@@ -78,35 +75,15 @@ export default function Analytics() {
         </div>
       </div>
 
-      {/* ── Velocidad de atención ── */}
-      <h3 className="section-title">Velocidad de atención</h3>
-      <div className="stat-grid">
-        <Tile label="1ª respuesta (mediana)" value={fmtMin(c.medianFirstResponseMin)}
-              delta={pct(c.medianFirstResponseMin, p.medianFirstResponseMin)} goodWhenDown />
-        <Tile label="Respondidas en <1 h" value={c.pctWithin1h == null ? "—" : `${c.pctWithin1h}%`}
-              delta={diff(c.pctWithin1h, p.pctWithin1h, " pts")} />
-        <Tile label="Tasa de respuesta" value={c.respondedRate == null ? "—" : `${c.respondedRate}%`}
-              delta={diff(c.respondedRate, p.respondedRate, " pts")} />
-        <Tile label="Esperando respuesta" value={fmt(summary.awaitingReply)} hint="ahora" alert={summary.awaitingReply > 0} />
-      </div>
-
-      {/* ── Demanda ── */}
-      <h3 className="section-title">Demanda</h3>
-      <div className="stat-grid">
-        <Tile label="Conversaciones nuevas" value={fmt(c.newConversations)} delta={pct(c.newConversations, p.newConversations)} />
-        <Tile label="Contactos nuevos" value={fmt(c.newContacts)} delta={pct(c.newContacts, p.newContacts)} />
-        <Tile label="Mensajes recibidos" value={fmt(c.inbound)} delta={pct(c.inbound, p.inbound)} dot={C_IN} />
-        <Tile label="Mensajes enviados" value={fmt(c.outbound)} delta={pct(c.outbound, p.outbound)} dot={C_OUT} />
-      </div>
-
-      {/* ── Resultado comercial ── */}
-      <h3 className="section-title">Resultado comercial</h3>
-      <div className="stat-grid">
-        <Tile label="Leads creados" value={fmt(c.leadsCreated)} delta={pct(c.leadsCreated, p.leadsCreated)} />
-        <Tile label="Leads ganados" value={fmt(c.leadsWon)} delta={pct(c.leadsWon, p.leadsWon)} />
-        <Tile label="Tasa de cierre" value={c.winRate == null ? "—" : `${c.winRate}%`}
-              delta={diff(c.winRate, p.winRate, " pts")} hint="ganados / cerrados" />
-        <Tile label="Valor ganado" value={fmtMoney(c.wonValue)} delta={pct(c.wonValue, p.wonValue)} />
+      {/* ── Resumen ── */}
+      <div className="stat-grid stat-grid-simple">
+        <SimpleTile label="Consultas" value={fmt(c.newConversations)}
+                    hint={`${fmt((c.inbound ?? 0) + (c.outbound ?? 0))} mensajes`} />
+        <SimpleTile label="Leads generados" value={fmt(c.leadsCreated)} hint={conversionHint(c)} />
+        <SimpleTile label="Ganados" value={fmt(c.leadsWon)} tone="good" hint={fmtMoney(c.wonValue)} />
+        <SimpleTile label="Perdidos" value={fmt(c.leadsLost)} tone="bad" />
+        <SimpleTile label="Tasa de cierre" value={c.winRate == null ? "—" : `${c.winRate}%`}
+                    hint={`${fmt(summary.openLeads)} abiertos`} />
       </div>
 
       <div className="chart-card">
@@ -138,7 +115,7 @@ export default function Analytics() {
         ) : (
           <table>
             <thead>
-              <tr><th>Agente</th><th>Msjs enviados</th><th>Conv. asignadas</th><th>Leads ganados</th><th>Valor ganado</th></tr>
+              <tr><th>Agente</th><th className="num">Msjs enviados</th><th className="num">Conv. asignadas</th><th className="num">Leads ganados</th><th className="num">Valor ganado</th></tr>
             </thead>
             <tbody>
               {agents.map((a) => (
@@ -158,62 +135,33 @@ export default function Analytics() {
   );
 }
 
-/* ── Deltas vs período anterior ─────────────────────────────────────── */
+/* ── Resumen simplificado ──────────────────────────────────────────── */
 
-function pct(cur: number | null | undefined, prev: number | null | undefined) {
-  if (cur == null || prev == null || prev === 0) return null;
-  return { value: ((cur - prev) / prev) * 100, suffix: "%" };
-}
-function diff(cur: number | null | undefined, prev: number | null | undefined, suffix: string) {
-  if (cur == null || prev == null) return null;
-  return { value: cur - prev, suffix };
-}
-
-function Tile({ label, value, delta, hint, dot, alert, goodWhenDown }: {
+function SimpleTile({ label, value, hint, tone }: {
   label: string;
   value: string;
-  delta?: { value: number; suffix: string } | null;
   hint?: string;
-  dot?: string;
-  alert?: boolean;
-  goodWhenDown?: boolean;
+  tone?: "good" | "bad";
 }) {
-  let deltaEl = null;
-  if (delta && Math.abs(delta.value) >= 0.05) {
-    const up = delta.value > 0;
-    const good = goodWhenDown ? !up : up;
-    deltaEl = (
-      <span className={`stat-delta ${good ? "good" : "bad"}`}>
-        {up ? "▲" : "▼"} {Math.abs(delta.value).toFixed(delta.suffix === "%" ? 0 : 1)}{delta.suffix}
-      </span>
-    );
-  }
   return (
     <div className="stat-tile">
-      <div className="stat-label">
-        {dot && <i className="stat-dot" style={{ background: dot }} />}
-        {label}
-      </div>
-      <div className={`stat-value ${alert ? "alert" : ""}`}>{value}</div>
-      <div className="stat-foot">
-        {deltaEl}
-        {hint && <span className="muted" style={{ fontSize: 11 }}>{hint}</span>}
-      </div>
+      <div className={`stat-value ${tone ?? ""}`}>{value}</div>
+      <div className="stat-label">{label}</div>
+      {hint && <div className="stat-hint">{hint}</div>}
     </div>
   );
 }
 
-/* ── Línea: mensajes por día ────────────────────────────────────────── */
+/* ── Barras: mensajes por día ──────────────────────────────────────── */
 
 function MessagesLine({ data }: { data: TsPoint[] }) {
   if (data.length === 0) return <p className="muted">Sin datos.</p>;
   const W = 720, H = 200, PL = 40, PR = 10, PT = 10, PB = 22;
   const max = niceCeil(Math.max(1, ...data.map((d) => Math.max(d.inbound, d.outbound))));
-  const x = (i: number) => PL + (i * (W - PL - PR)) / Math.max(1, data.length - 1);
   const y = (v: number) => PT + (H - PT - PB) * (1 - v / max);
-  const path = (key: "inbound" | "outbound") =>
-    data.map((d, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(d[key]).toFixed(1)}`).join(" ");
-  const colW = (W - PL - PR) / Math.max(1, data.length - 1);
+  const colW = (W - PL - PR) / data.length;
+  const barW = Math.min(14, colW / 2 - 2);
+  const groupX = (i: number) => PL + i * colW + colW / 2;
   const label = (iso: string) => iso.slice(8, 10) + "/" + iso.slice(5, 7);
 
   return (
@@ -229,23 +177,20 @@ function MessagesLine({ data }: { data: TsPoint[] }) {
       ))}
       <line x1={PL} x2={W - PR} y1={y(0)} y2={y(0)} className="axis-line" />
       {[0, Math.floor((data.length - 1) / 2), data.length - 1].map((i) => (
-        <text key={i} x={x(i)} y={H - 6} className="axis-text" textAnchor="middle">
+        <text key={i} x={groupX(i)} y={H - 6} className="axis-text" textAnchor="middle">
           {label(data[i].date)}
         </text>
       ))}
-      <path d={path("inbound")} fill="none" stroke={C_IN} strokeWidth="2" strokeLinejoin="round" />
-      <path d={path("outbound")} fill="none" stroke={C_OUT} strokeWidth="2" strokeLinejoin="round" />
-      {data.length <= 31 &&
-        data.map((d, i) => (
-          <g key={d.date}>
-            <circle cx={x(i)} cy={y(d.inbound)} r="2.5" fill={C_IN} className="pt" />
-            <circle cx={x(i)} cy={y(d.outbound)} r="2.5" fill={C_OUT} className="pt" />
-          </g>
-        ))}
       {data.map((d, i) => (
-        <rect key={d.date} x={x(i) - colW / 2} y={0} width={colW} height={H} fill="transparent">
-          <title>{`${label(d.date)} — recibidos: ${d.inbound} · enviados: ${d.outbound} · conv. nuevas: ${d.newConversations}`}</title>
-        </rect>
+        <g key={d.date}>
+          <rect x={groupX(i) - barW - 1} y={y(d.inbound)} width={barW} height={Math.max(0, y(0) - y(d.inbound))}
+                rx="1.5" fill={C_IN} className="bar" />
+          <rect x={groupX(i) + 1} y={y(d.outbound)} width={barW} height={Math.max(0, y(0) - y(d.outbound))}
+                rx="1.5" fill={C_OUT} className="bar" />
+          <rect x={PL + i * colW} y={0} width={colW} height={H} fill="transparent">
+            <title>{`${label(d.date)} — recibidos: ${d.inbound} · enviados: ${d.outbound} · conv. nuevas: ${d.newConversations}`}</title>
+          </rect>
+        </g>
       ))}
     </svg>
   );

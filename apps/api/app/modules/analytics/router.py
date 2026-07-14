@@ -159,8 +159,14 @@ async def summary(
         ~sa.exists(later_outbound),
     ))
 
+    # Snapshot operativo: leads actualmente en una etapa no terminal
+    open_leads = await _count(db, sa.select(sa.func.count())
+        .select_from(Lead)
+        .join(PipelineStage, Lead.stage_id == PipelineStage.id)
+        .where(Lead.deleted_at.is_(None), PipelineStage.is_terminal.is_(False)))
+
     return {"days": days, "current": current, "previous": previous,
-            "awaitingReply": awaiting}
+            "awaitingReply": awaiting, "openLeads": open_leads}
 
 
 @router.get("/timeseries")

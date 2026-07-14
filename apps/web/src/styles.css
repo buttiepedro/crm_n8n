@@ -793,6 +793,11 @@ tbody tr:hover { background: var(--bg-subtle); }
   letter-spacing: -0.01em;
 }
 .stat-value.alert { color: var(--color-warning-text); }
+.stat-value.good { color: var(--color-success-text); }
+.stat-value.bad { color: var(--color-danger); }
+.stat-grid-simple .stat-value { margin-top: 0; }
+.stat-grid-simple .stat-label { margin-top: 6px; }
+.stat-hint { color: var(--color-primary); font-size: 12px; font-weight: 600; margin-top: 4px; }
 .stat-foot { display: flex; align-items: center; gap: 8px; margin-top: 4px; min-height: 18px; }
 .stat-delta {
   font-size: 11px;
@@ -833,7 +838,7 @@ tbody tr:hover { background: var(--bg-subtle); }
 .axis-text { fill: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
 .pt { stroke: var(--bg-card); stroke-width: 1.5; }
 .bar:hover { opacity: .8; }
-td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 .funnel-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .funnel-label {
