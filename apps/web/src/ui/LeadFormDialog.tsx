@@ -136,96 +136,98 @@ export function LeadFormDialog({
           </button>
         </div>
 
-        {contact && (
-          <div className="lead-form-context">
-            {mode === "create" ? "Conversación" : "Contacto"}: <strong>{name}</strong>
-            {contact.waId && <span className="muted"> · +{contact.waId}</span>}
-            <span className="muted"> · {channelLabel}</span>
-          </div>
-        )}
-
-        <div className="lead-form-body">
-          {mode === "create" && onAnalyze && (
-            analyzed ? (
-              <div className="ai-analyzed-note"><CheckIcon /> Campos prellenados por IA — revisá antes de guardar</div>
-            ) : (
-              <button type="button" className="ai-analyze-btn" disabled={analyzing} onClick={analyze}>
-                <SparkleIcon /> {analyzing ? "Analizando conversación…" : "Analizar conversación con IA"}
-              </button>
-            )
+        <div className="lead-form-scroll">
+          {contact && (
+            <div className="lead-form-context">
+              {mode === "create" ? "Conversación" : "Contacto"}: <strong>{name}</strong>
+              {contact.waId && <span className="muted"> · +{contact.waId}</span>}
+              <span className="muted"> · {channelLabel}</span>
+            </div>
           )}
-        </div>
 
-        <div className="lead-form-body form-grid">
-          <label style={{ gridColumn: "1 / -1" }}>
-            Título del lead
-            <input value={values.title} onChange={(e) => set("title", e.target.value)} autoFocus />
-          </label>
-
-          <label>
-            Empresa
-            <input
-              value={values.company}
-              onChange={(e) => set("company", e.target.value)}
-              placeholder="Opcional"
-            />
-          </label>
-          <label>
-            Prioridad
-            <Select
-              value={values.priority}
-              onChange={(v) => set("priority", v as LeadFormValues["priority"])}
-              options={PRIORITY_OPTIONS}
-            />
-          </label>
-
-          <label>
-            {mode === "create" ? "Etapa inicial" : "Etapa"}
-            <Select value={values.stageId} onChange={(v) => set("stageId", v)} options={stages.map((s) => ({ value: s.id, label: s.name }))} />
-          </label>
-          <label>
-            Valor esperado (opcional)
-            <input
-              type="number"
-              inputMode="decimal"
-              className="no-spinner"
-              value={values.value}
-              onChange={(e) => set("value", e.target.value)}
-              placeholder="0"
-            />
-          </label>
-
-          {customFields.map((f) => (
-            <label key={f.id}>
-              {f.label}
-              {f.type === "select" ? (
-                <Select
-                  value={values.custom[f.key] ?? ""}
-                  onChange={(v) => setCustom(f.key, v)}
-                  options={(f.options ?? []).map((o) => ({ value: o, label: o }))}
-                />
+          <div className="lead-form-body">
+            {mode === "create" && onAnalyze && (
+              analyzed ? (
+                <div className="ai-analyzed-note"><CheckIcon /> Campos prellenados por IA — revisá antes de guardar</div>
               ) : (
-                <input
-                  type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
-                  value={values.custom[f.key] ?? ""}
-                  onChange={(e) => setCustom(f.key, e.target.value)}
-                />
-              )}
-            </label>
-          ))}
+                <button type="button" className="ai-analyze-btn" disabled={analyzing} onClick={analyze}>
+                  <SparkleIcon /> {analyzing ? "Analizando conversación…" : "Analizar conversación con IA"}
+                </button>
+              )
+            )}
+          </div>
 
-          {mode === "create" && (
+          <div className="lead-form-body form-grid">
             <label style={{ gridColumn: "1 / -1" }}>
-              Notas
-              <textarea
-                rows={3}
-                style={{ resize: "vertical", fontFamily: "inherit" }}
-                value={values.notes}
-                onChange={(e) => set("notes", e.target.value)}
-                placeholder="Contexto inicial del lead (opcional)"
+              Título del lead
+              <input value={values.title} onChange={(e) => set("title", e.target.value)} autoFocus />
+            </label>
+
+            <label>
+              Empresa
+              <input
+                value={values.company}
+                onChange={(e) => set("company", e.target.value)}
+                placeholder="Opcional"
               />
             </label>
-          )}
+            <label>
+              Prioridad
+              <Select
+                value={values.priority}
+                onChange={(v) => set("priority", v as LeadFormValues["priority"])}
+                options={PRIORITY_OPTIONS}
+              />
+            </label>
+
+            <label>
+              {mode === "create" ? "Etapa inicial" : "Etapa"}
+              <Select value={values.stageId} onChange={(v) => set("stageId", v)} options={stages.map((s) => ({ value: s.id, label: s.name }))} />
+            </label>
+            <label>
+              Valor esperado (opcional)
+              <input
+                type="number"
+                inputMode="decimal"
+                className="no-spinner"
+                value={values.value}
+                onChange={(e) => set("value", e.target.value)}
+                placeholder="0"
+              />
+            </label>
+
+            {customFields.map((f) => (
+              <label key={f.id}>
+                {f.label}
+                {f.type === "select" ? (
+                  <Select
+                    value={values.custom[f.key] ?? ""}
+                    onChange={(v) => setCustom(f.key, v)}
+                    options={(f.options ?? []).map((o) => ({ value: o, label: o }))}
+                  />
+                ) : (
+                  <input
+                    type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
+                    value={values.custom[f.key] ?? ""}
+                    onChange={(e) => setCustom(f.key, e.target.value)}
+                  />
+                )}
+              </label>
+            ))}
+
+            {mode === "create" && (
+              <label style={{ gridColumn: "1 / -1" }}>
+                Notas
+                <textarea
+                  rows={3}
+                  style={{ resize: "vertical", fontFamily: "inherit" }}
+                  value={values.notes}
+                  onChange={(e) => set("notes", e.target.value)}
+                  placeholder="Contexto inicial del lead (opcional)"
+                />
+              </label>
+            )}
+          </div>
         </div>
 
         <div className="dialog-actions">

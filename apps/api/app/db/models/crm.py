@@ -50,6 +50,10 @@ class Lead(UUIDPkMixin, TimestampedMixin, Base):
     __table_args__ = (
         sa.Index("idx_leads_stage", "pipeline_id", "stage_id",
                  postgresql_where=sa.text("deleted_at IS NULL")),
+        # Único solo entre leads vivos: permite que un lead borrado libere su
+        # external_key para que el webhook cree uno nuevo sin violar unicidad.
+        sa.Index("uq_leads_external_key_active", "external_key", unique=True,
+                 postgresql_where=sa.text("deleted_at IS NULL")),
     )
 
     contact_id: Mapped[uuid.UUID] = mapped_column(
@@ -65,7 +69,7 @@ class Lead(UUIDPkMixin, TimestampedMixin, Base):
         UUID(as_uuid=True), sa.ForeignKey("pipeline_stages.id"), nullable=False
     )
     # Clave idempotente para upsert desde el webhook de n8n
-    external_key: Mapped[str | None] = mapped_column(sa.Text, unique=True)
+    external_key: Mapped[str | None] = mapped_column(sa.Text)
     title: Mapped[str] = mapped_column(sa.Text, nullable=False)
     value: Mapped[Decimal | None] = mapped_column(sa.Numeric(14, 2))
     currency: Mapped[str | None] = mapped_column(sa.CHAR(3), default="ARS")

@@ -382,19 +382,20 @@ async def funnel(
     )).all()}
 
     items = []
-    prev_entered: int | None = None
+    prev_count: int | None = None
     for s in stages:
-        stage_entered = entered.get(s.id, 0)
-        # % sobre la última etapa de flujo (ej. "Propuesta") — se calcula para
-        # TODAS las etapas, incluidas las terminales (Ganado/Perdido), para
-        # que se vean con la misma información que el resto.
-        conversion = round(stage_entered / prev_entered * 100, 1) if prev_entered else None
+        stage_count = current.get(s.id, 0)
+        # % sobre la etapa de flujo anterior (ej. "Propuesta"), calculado con
+        # el MISMO número que se muestra (currentCount) — antes se mezclaba
+        # con enteredInPeriod (histórico de eventos), lo que podía dar %
+        # inconsistentes con el número mostrado (ej. "0 · 100%" o "1 · 150%").
+        conversion = round(stage_count / prev_count * 100, 1) if prev_count else None
         items.append({
             "id": str(s.id), "name": s.name, "isTerminal": s.is_terminal,
-            "outcome": s.outcome, "currentCount": current.get(s.id, 0),
-            "enteredInPeriod": stage_entered, "conversionFromPrev": conversion,
+            "outcome": s.outcome, "currentCount": stage_count,
+            "enteredInPeriod": entered.get(s.id, 0), "conversionFromPrev": conversion,
         })
         if not s.is_terminal:
-            prev_entered = stage_entered
+            prev_count = stage_count
     return {"pipeline": {"id": str(pipeline.id), "name": pipeline.name},
             "days": days, "items": items}

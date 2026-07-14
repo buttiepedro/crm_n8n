@@ -88,7 +88,10 @@ async def _find_or_create_lead(
 
     if data.external_key:
         result = await session.execute(
-            sa.select(Lead).where(Lead.external_key == data.external_key)
+            sa.select(Lead).where(
+                Lead.external_key == data.external_key,
+                Lead.deleted_at.is_(None),
+            )
         )
         lead = result.scalar_one_or_none()
 
