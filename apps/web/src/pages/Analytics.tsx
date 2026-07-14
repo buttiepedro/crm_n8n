@@ -27,7 +27,7 @@ type Summary = {
 type TsPoint = { date: string; inbound: number; outbound: number; newConversations: number; leadsCreated: number };
 type HourPoint = { hourUtc: number; count: number };
 type AgentRow = { userId: string; name: string; outboundMessages: number; conversationsAssigned: number; leadsWon: number; wonValue: number };
-type FunnelStage = { id: string; name: string; isTerminal: boolean; outcome: string | null; currentCount: number; enteredInPeriod: number; conversionFromPrev: number | null };
+type FunnelStage = { id: string; name: string; isTerminal: boolean; outcome: string | null; currentCount: number; enteredInPeriod: number; pctOfTotal: number | null };
 
 const nf = new Intl.NumberFormat("es-AR");
 const fmt = (n: number | null | undefined) => (n == null ? "—" : nf.format(n));
@@ -281,8 +281,8 @@ function FunnelBars({ stages, historic }: { stages: FunnelStage[]; historic: boo
           </div>
           <span className="funnel-num">
             {nf.format(s.currentCount)}
-            {s.conversionFromPrev != null && (
-              <span className="muted" style={{ fontSize: 11 }}> · {s.conversionFromPrev}%</span>
+            {s.pctOfTotal != null && (
+              <span className="muted" style={{ fontSize: 11 }}> · {s.pctOfTotal}%</span>
             )}
           </span>
         </div>
@@ -291,7 +291,7 @@ function FunnelBars({ stages, historic }: { stages: FunnelStage[]; historic: boo
         {historic
           ? "Cantidad de leads actualmente en cada etapa (todo el historial)."
           : "Leads que llegaron a su etapa actual dentro del período seleccionado."}
-        {" "}% = conversión desde la etapa anterior.
+        {" "}% = porcentaje sobre el total de leads del período.
       </p>
     </div>
   );

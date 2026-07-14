@@ -381,21 +381,17 @@ async def funnel(
         .group_by(LeadStageEvent.to_stage_id)
     )).all()}
 
+    # % = participación de la etapa sobre el TOTAL de leads del período,
+    # calculado con el mismo número que se muestra (currentCount).
+    total = sum(current.get(s.id, 0) for s in stages)
     items = []
-    prev_count: int | None = None
     for s in stages:
         stage_count = current.get(s.id, 0)
-        # % sobre la etapa de flujo anterior (ej. "Propuesta"), calculado con
-        # el MISMO número que se muestra (currentCount) — antes se mezclaba
-        # con enteredInPeriod (histórico de eventos), lo que podía dar %
-        # inconsistentes con el número mostrado (ej. "0 · 100%" o "1 · 150%").
-        conversion = round(stage_count / prev_count * 100, 1) if prev_count else None
         items.append({
             "id": str(s.id), "name": s.name, "isTerminal": s.is_terminal,
             "outcome": s.outcome, "currentCount": stage_count,
-            "enteredInPeriod": entered.get(s.id, 0), "conversionFromPrev": conversion,
+            "enteredInPeriod": entered.get(s.id, 0),
+            "pctOfTotal": round(stage_count / total * 100, 1) if total else None,
         })
-        if not s.is_terminal:
-            prev_count = stage_count
     return {"pipeline": {"id": str(pipeline.id), "name": pipeline.name},
             "days": days, "items": items}
