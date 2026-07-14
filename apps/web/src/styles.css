@@ -575,7 +575,24 @@ tbody tr:hover { background: var(--bg-subtle); }
 
 .kcard[role="button"] { outline: none; }
 .kcard[role="button"]:focus-visible { box-shadow: 0 0 0 3px var(--accent-ring); border-color: var(--border-focus); }
+.kcard-archived { opacity: .6; }
+.kcard-archived:hover { opacity: .85; }
+.kcard-archived-pill { margin-top: 6px; }
 .kcard-head { display: flex; align-items: center; gap: 10px; }
+.kcard-archive-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+}
+.kcard-archive-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .kcard-avatar {
   width: 34px;
   height: 34px;

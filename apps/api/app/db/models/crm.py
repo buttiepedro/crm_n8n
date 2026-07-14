@@ -78,6 +78,7 @@ class Lead(UUIDPkMixin, TimestampedMixin, Base):
     attributes: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=sa.text("'{}'::jsonb")
     )
+    archived_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
 

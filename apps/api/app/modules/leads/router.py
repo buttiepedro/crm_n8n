@@ -58,6 +58,7 @@ def _lead_row(lead: Lead, contact: Contact | None = None, notes: list[str] | Non
         "conversationId": str(lead.conversation_id) if lead.conversation_id else None,
         "ownerUserId": str(lead.owner_user_id) if lead.owner_user_id else None,
         "attributes": lead.attributes,
+        "archivedAt": lead.archived_at.isoformat() if lead.archived_at else None,
         "contact": (
             {"id": str(contact.id), "waId": contact.wa_id, "profileName": contact.profile_name}
             if contact else None
@@ -343,6 +344,7 @@ async def list_leads(
     pipeline_id: uuid.UUID | None = Query(None, alias="pipelineId"),
     stage_id: uuid.UUID | None = Query(None, alias="stageId"),
     q: str | None = None,
+    include_archived: bool = Query(False, alias="includeArchived"),
     limit: int = Query(100, le=500),
     auth: AuthContext = Depends(require_permissions(perms.LEADS_READ)),
     db: AsyncSession = Depends(get_db),
@@ -351,6 +353,8 @@ async def list_leads(
         sa.select(Lead, Contact).join(Contact, Lead.contact_id == Contact.id)
         .where(Lead.deleted_at.is_(None)).order_by(Lead.created_at.desc()).limit(limit)
     )
+    if not include_archived:
+        stmt = stmt.where(Lead.archived_at.is_(None))
     if pipeline_id:
         stmt = stmt.where(Lead.pipeline_id == pipeline_id)
     if stage_id:
@@ -536,6 +540,35 @@ async def move_lead_stage(
     await log_event(db, actor_type="user", actor_id=auth.user.id,
                     action="lead.stage_changed", entity_type="lead", entity_id=lead.id,
                     metadata={"toStage": stage.name})
+    await db.commit()
+    return {"ok": True}
+
+
+class ArchiveIn(CamelModel):
+    archived: bool
+
+
+@router.patch("/leads/{lead_id}/archive")
+async def set_lead_archived(
+    lead_id: uuid.UUID,
+    body: ArchiveIn,
+    auth: AuthContext = Depends(require_permissions(perms.LEADS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    lead = await db.get(Lead, lead_id)
+    if lead is None or lead.deleted_at is not None:
+        raise NotFoundError("Lead inexistente")
+    if body.archived:
+        stage = await db.get(PipelineStage, lead.stage_id)
+        if stage is None or not stage.is_terminal:
+            raise ConflictError(
+                "Solo se pueden archivar leads en una etapa terminal (ganado/perdido/etc.)")
+        lead.archived_at = datetime.now(UTC)
+    else:
+        lead.archived_at = None
+    await log_event(db, actor_type="user", actor_id=auth.user.id,
+                    action="lead.archived" if body.archived else "lead.unarchived",
+                    entity_type="lead", entity_id=lead.id)
     await db.commit()
     return {"ok": True}
 

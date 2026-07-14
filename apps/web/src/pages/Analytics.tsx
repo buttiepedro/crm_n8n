@@ -237,18 +237,18 @@ function HourBars({ data }: { data: HourPoint[] }) {
 function FunnelBars({ stages }: { stages: FunnelStage[] }) {
   const flow = stages.filter((s) => !s.isTerminal);
   const terminal = stages.filter((s) => s.isTerminal);
-  const max = Math.max(1, ...flow.map((s) => s.enteredInPeriod));
+  const max = Math.max(1, ...flow.map((s) => s.currentCount));
 
   return (
     <div>
       {flow.map((s) => (
-        <div className="funnel-row" key={s.id} title={`${s.name}: ${s.enteredInPeriod} entradas en el período · ${s.currentCount} actualmente`}>
+        <div className="funnel-row" key={s.id} title={`${s.name}: ${s.currentCount} actualmente · ${s.enteredInPeriod} entradas en el período`}>
           <span className="funnel-label">{s.name}</span>
           <div className="funnel-track">
-            <div className="funnel-bar" style={{ width: `${Math.max(4, (s.enteredInPeriod / max) * 100)}%` }} />
+            <div className="funnel-bar" style={{ width: `${Math.max(4, (s.currentCount / max) * 100)}%` }} />
           </div>
           <span className="funnel-num">
-            {nf.format(s.enteredInPeriod)}
+            {nf.format(s.currentCount)}
             {s.conversionFromPrev != null && (
               <span className="muted" style={{ fontSize: 11 }}> · {s.conversionFromPrev}%</span>
             )}
@@ -265,7 +265,7 @@ function FunnelBars({ stages }: { stages: FunnelStage[] }) {
         </div>
       )}
       <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-        Entradas por etapa en el período · % = conversión desde la etapa anterior.
+        Cantidad de leads actualmente en cada etapa · % = conversión desde la etapa anterior (entradas en el período).
       </p>
     </div>
   );

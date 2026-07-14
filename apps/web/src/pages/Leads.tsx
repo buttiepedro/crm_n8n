@@ -5,6 +5,7 @@ import { api, showError } from "../api";
 import { useAuth } from "../auth";
 import { CustomFieldsAdmin } from "../ui/CustomFieldsAdmin";
 import { Select } from "../ui/Select";
+import { Switch } from "../ui/Switch";
 import { confirmDialog, promptDialog } from "../ui/dialogs";
 import { LeadFormDialog, type FieldDef, type LeadFormValues } from "../ui/LeadFormDialog";
 
@@ -41,6 +42,21 @@ const UserIcon = () => (
     <circle cx="12" cy="7" r="4" />
   </svg>
 );
+const ArchiveIcon = () => (
+  <svg {...ICON} aria-hidden>
+    <polyline points="21 8 21 21 3 21 3 8" />
+    <rect x="1" y="3" width="22" height="5" />
+    <line x1="10" y1="12" x2="14" y2="12" />
+  </svg>
+);
+const UnarchiveIcon = () => (
+  <svg {...ICON} aria-hidden>
+    <polyline points="21 8 21 21 3 21 3 8" />
+    <rect x="1" y="3" width="22" height="5" />
+    <polyline points="9 15 12 12 15 15" />
+    <line x1="12" y1="12" x2="12" y2="19" />
+  </svg>
+);
 
 type Stage = {
   id: string;
@@ -66,6 +82,7 @@ type Lead = {
   contact: { profileName: string | null; waId: string } | null;
   conversationId: string | null;
   ownerUserId: string | null;
+  archivedAt: string | null;
 };
 type LeadHistoryEvent = { fromStageId: string | null; toStageId: string; movedBy: string; at: string };
 type LeadNote = { id: string; body: string; authorSource: string; updatedAt: string };
@@ -123,6 +140,7 @@ export default function Leads() {
   const [customFields, setCustomFields] = useState<FieldDef[]>([]);
   const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
   const [showFieldsAdmin, setShowFieldsAdmin] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
   const loadCustomFields = useCallback(() => {
     api.get<{ items: FieldDef[] }>("/lead-field-definitions").then((d) => setCustomFields(d.items)).catch(() => {});
@@ -142,13 +160,14 @@ export default function Leads() {
       if (current) {
         const params = new URLSearchParams({ pipelineId: current });
         if (q) params.set("q", q);
+        if (showArchived) params.set("includeArchived", "true");
         const l = await api.get<{ items: Lead[] }>(`/leads?${params}`);
         setLeads(l.items);
       }
     } catch (e) {
       showError(e);
     }
-  }, [pipelineId, q]);
+  }, [pipelineId, q, showArchived]);
 
   useEffect(() => {
     load();
@@ -204,6 +223,7 @@ export default function Leads() {
   };
 
   const canDrag = can("leads:move_stage");
+  const canWrite = can("leads:write");
 
   const onDrop = (stageId: string) => {
     if (dragLead) move(dragLead, stageId);
@@ -263,6 +283,19 @@ export default function Leads() {
 
   const goToConversation = (conversationId: string) => {
     navigate(`/?conversationId=${conversationId}`);
+  };
+
+  const setArchived = async (lead: LeadRef, archived: boolean) => {
+    try {
+      await api.patch(`/leads/${lead.id}/archive`, { archived });
+      if (detail && detail.id === lead.id) {
+        if (archived && !showArchived) closeDetail();
+        else setDetail((d) => (d && d.id === lead.id ? { ...d, archivedAt: archived ? new Date().toISOString() : null } : d));
+      }
+      await load();
+    } catch (e) {
+      showError(e);
+    }
   };
 
   const removeLead = async (lead: LeadRef) => {
@@ -351,6 +384,7 @@ export default function Leads() {
           options={pipelines.map((p) => ({ value: p.id, label: `${p.name}${p.isDefault ? " ★" : ""}` }))}
         />
         <input placeholder="Buscar…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Switch checked={showArchived} onChange={setShowArchived} label="Mostrar archivados" />
         {can("pipelines:manage") && (
           <button className="btn-icon-label" onClick={addStage}>
             <PlusIcon /> Etapa
@@ -429,11 +463,12 @@ export default function Leads() {
                   const name = l.contact?.profileName || l.contact?.waId || l.title;
                   const company = getCompany(l.attributes);
                   const priority = getPriority(l.attributes);
+                  const archived = !!l.archivedAt;
                   return (
                     <div
-                      className={`kcard${dragLead?.id === l.id ? " dragging" : ""}`}
+                      className={`kcard${dragLead?.id === l.id ? " dragging" : ""}${archived ? " kcard-archived" : ""}`}
                       key={l.id}
-                      draggable={canDrag}
+                      draggable={canDrag && !archived}
                       role="button"
                       tabIndex={0}
                       onClick={() => openLead(l)}
@@ -461,7 +496,24 @@ export default function Leads() {
                           <div className="t">{name}</div>
                           {l.contact?.waId && <div className="kcard-phone">+{l.contact.waId}</div>}
                         </div>
+                        {canWrite && archived && (
+                          <button
+                            className="kcard-archive-btn" title="Desarchivar" aria-label="Desarchivar"
+                            onClick={(e) => { e.stopPropagation(); setArchived(l, false); }}
+                          >
+                            <UnarchiveIcon />
+                          </button>
+                        )}
+                        {canWrite && !archived && s.isTerminal && (
+                          <button
+                            className="kcard-archive-btn" title="Archivar" aria-label="Archivar"
+                            onClick={(e) => { e.stopPropagation(); setArchived(l, true); }}
+                          >
+                            <ArchiveIcon />
+                          </button>
+                        )}
                       </div>
+                      {archived && <div className="pill kcard-archived-pill">Archivado</div>}
                       {company && <div className="kcard-company">{company}</div>}
                       {(l.value != null || l.source === "n8n_webhook" || priority || l.ownerUserId) && (
                         <div className="kcard-foot">
@@ -500,13 +552,14 @@ export default function Leads() {
           customFields={customFields}
           meId={me?.id ?? null}
           canMoveStage={canDrag}
-          canEdit={can("leads:write")}
+          canEdit={canWrite}
           canDelete={can("leads:delete")}
           onClose={closeDetail}
           onMoveStage={(stageId) => detail && move(detail, stageId)}
           onEdit={() => detail && startEdit(detail)}
           onDelete={() => detail && removeLead(detail)}
           onAssignOwner={(userId) => detail && assignOwner(detail.id, userId)}
+          onSetArchived={(archived) => detail && setArchived(detail, archived)}
           onGoToConversation={goToConversation}
         />
       )}
@@ -557,6 +610,7 @@ function LeadDetailModal({
   onEdit,
   onDelete,
   onAssignOwner,
+  onSetArchived,
   onGoToConversation,
 }: {
   lead: LeadDetail | null;
@@ -574,6 +628,7 @@ function LeadDetailModal({
   onEdit: () => void;
   onDelete: () => void;
   onAssignOwner: (userId: string) => void;
+  onSetArchived: (archived: boolean) => void;
   onGoToConversation: (conversationId: string) => void;
 }) {
   useEffect(() => {
@@ -592,6 +647,8 @@ function LeadDetailModal({
   const company = getCompany(lead?.attributes);
   const priority = getPriority(lead?.attributes);
   const currentStageColor = lead ? stageColorMap[lead.stageId] : undefined;
+  const archived = !!lead?.archivedAt;
+  const isTerminalStage = lead ? stages.find((s) => s.id === lead.stageId)?.isTerminal ?? false : false;
   const HIDDEN_ATTR_KEYS = ["company", "empresa", "Company", "Empresa", "priority"];
   const fieldLabel = (key: string) => customFields.find((f) => f.key === key)?.label ?? key;
   const extraAttrs = lead
@@ -628,6 +685,7 @@ function LeadDetailModal({
                   >
                     {stages.find((s) => s.id === lead.stageId)?.name ?? "—"}
                   </span>
+                  {archived && <span className="pill">Archivado</span>}
                 </div>
               </div>
               <button className="dialog-close" onClick={onClose} aria-label="Cerrar" title="Cerrar">
@@ -713,6 +771,16 @@ function LeadDetailModal({
               {canEdit && (
                 <button className="btn-icon-label" onClick={onEdit}>
                   <PencilIcon /> Editar
+                </button>
+              )}
+              {canEdit && archived && (
+                <button className="btn-icon-label" onClick={() => onSetArchived(false)}>
+                  <UnarchiveIcon /> Desarchivar
+                </button>
+              )}
+              {canEdit && !archived && isTerminalStage && (
+                <button className="btn-icon-label" onClick={() => onSetArchived(true)}>
+                  <ArchiveIcon /> Archivar
                 </button>
               )}
               {canDelete && (
