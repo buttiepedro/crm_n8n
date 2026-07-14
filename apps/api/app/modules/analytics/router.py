@@ -62,16 +62,23 @@ def _current_stage_entered_at():
     )
 
 
-def _won_leads_in_window(start: datetime | None, end: datetime, outcome: str):
-    """Leads (distintos) que ENTRARON a una etapa terminal en la ventana."""
-    conds = [PipelineStage.outcome == outcome, LeadStageEvent.created_at < end]
+def _leads_currently_outcome(start: datetime | None, end: datetime, outcome: str):
+    """Leads cuya etapa ACTUAL tiene este outcome (won/lost), cohorteados por
+    cuándo entraron a ella — mismo criterio que funnel.currentCount. A
+    diferencia de contar transiciones (evento histórico), esto excluye leads
+    borrados y leads que ya no están en esa etapa (por ejemplo, si se
+    reabrieron)."""
+    entered_at = _current_stage_entered_at()
+    conds = [Lead.deleted_at.is_(None), PipelineStage.outcome == outcome,
+             entered_at.c.entered_at < end]
     if start is not None:
-        conds.append(LeadStageEvent.created_at >= start)
+        conds.append(entered_at.c.entered_at >= start)
     return (
-        sa.select(LeadStageEvent.lead_id)
-        .join(PipelineStage, LeadStageEvent.to_stage_id == PipelineStage.id)
+        sa.select(Lead.id.label("lead_id"))
+        .select_from(Lead)
+        .join(PipelineStage, Lead.stage_id == PipelineStage.id)
+        .join(entered_at, entered_at.c.lead_id == Lead.id)
         .where(*conds)
-        .distinct()
     )
 
 
@@ -95,8 +102,8 @@ async def _window_metrics(db: AsyncSession, start: datetime | None, end: datetim
         db, sa.select(sa.func.count()).where(
             in_window(Lead.created_at), Lead.deleted_at.is_(None)))
 
-    won_ids = _won_leads_in_window(start, end, "won").subquery()
-    lost_ids = _won_leads_in_window(start, end, "lost").subquery()
+    won_ids = _leads_currently_outcome(start, end, "won").subquery()
+    lost_ids = _leads_currently_outcome(start, end, "lost").subquery()
     leads_won = await _count(db, sa.select(sa.func.count()).select_from(won_ids))
     leads_lost = await _count(db, sa.select(sa.func.count()).select_from(lost_ids))
     won_value = (await db.execute(
@@ -303,7 +310,7 @@ async def agents(
     )).all():
         entry(user_id)["conversationsAssigned"] = count
 
-    won_ids = _won_leads_in_window(since, now, "won").subquery()
+    won_ids = _leads_currently_outcome(since, now, "won").subquery()
     for user_id, count, value in (await db.execute(
         sa.select(Lead.owner_user_id, sa.func.count(),
                   sa.func.coalesce(sa.func.sum(Lead.value), 0))
