@@ -4,6 +4,7 @@
  *  El color sigue a la entidad — idéntico en ambos temas. */
 import { useEffect, useState } from "react";
 import { api, showError } from "../api";
+import { stageColor } from "../stageColors";
 import { Select } from "../ui/Select";
 
 const C_IN = "#16a34a";
@@ -27,7 +28,7 @@ type Summary = {
 type TsPoint = { date: string; inbound: number; outbound: number; newConversations: number; leadsCreated: number };
 type HourPoint = { hourUtc: number; count: number };
 type AgentRow = { userId: string; name: string; outboundMessages: number; conversationsAssigned: number; leadsWon: number; wonValue: number };
-type FunnelStage = { id: string; name: string; isTerminal: boolean; outcome: string | null; currentCount: number; enteredInPeriod: number; pctOfTotal: number | null };
+type FunnelStage = { id: string; name: string; isTerminal: boolean; outcome: string | null; color: string | null; currentCount: number; enteredInPeriod: number; pctOfTotal: number | null };
 
 const nf = new Intl.NumberFormat("es-AR");
 const fmt = (n: number | null | undefined) => (n == null ? "—" : nf.format(n));
@@ -266,18 +267,16 @@ function HourBars({ data }: { data: HourPoint[] }) {
 function FunnelBars({ stages, historic }: { stages: FunnelStage[]; historic: boolean }) {
   const max = Math.max(1, ...stages.map((s) => s.currentCount));
   const countLabel = historic ? "actualmente" : "entraron a la etapa en el período";
-  const barColor = (s: FunnelStage) =>
-    s.outcome === "won" ? "var(--color-success-text)" : s.outcome === "lost" ? "var(--color-danger)" : undefined;
 
   return (
     <div>
-      {stages.map((s) => (
+      {stages.map((s, i) => (
         <div className="funnel-row" key={s.id} title={`${s.name}: ${s.currentCount} ${countLabel}`}>
           <span className="funnel-label">
             {s.outcome === "won" ? "✓ " : s.outcome === "lost" ? "✕ " : ""}{s.name}
           </span>
           <div className="funnel-track">
-            <div className="funnel-bar" style={{ width: `${Math.max(4, (s.currentCount / max) * 100)}%`, background: barColor(s) }} />
+            <div className="funnel-bar" style={{ width: `${Math.max(4, (s.currentCount / max) * 100)}%`, background: stageColor(s.color, i) }} />
           </div>
           <span className="funnel-num">
             {nf.format(s.currentCount)}

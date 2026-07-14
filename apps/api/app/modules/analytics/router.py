@@ -389,7 +389,7 @@ async def funnel(
         stage_count = current.get(s.id, 0)
         items.append({
             "id": str(s.id), "name": s.name, "isTerminal": s.is_terminal,
-            "outcome": s.outcome, "currentCount": stage_count,
+            "outcome": s.outcome, "color": s.color, "currentCount": stage_count,
             "enteredInPeriod": entered.get(s.id, 0),
             "pctOfTotal": round(stage_count / total * 100, 1) if total else None,
         })

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "r
 import { useNavigate } from "react-router-dom";
 import { api, showError } from "../api";
 import { useAuth } from "../auth";
+import { STAGE_COLORS } from "../stageColors";
 import { CustomFieldsAdmin } from "../ui/CustomFieldsAdmin";
 import { Select } from "../ui/Select";
 import { Switch } from "../ui/Switch";
@@ -98,8 +99,6 @@ type LeadDetail = Omit<Lead, "notes"> & {
  * acciones — evita acoplar move/editLead/removeLead al shape de notas. */
 type LeadRef = { id: string; title: string; value: number | null; stageId: string };
 
-/* Paleta de respaldo cuando la etapa no tiene color asignado */
-const STAGE_COLORS = ["#6366f1", "#0ea5e9", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6", "#14b8a6", "#ef4444"];
 
 function getCompany(attrs: Record<string, unknown> | undefined): string | null {
   const v = attrs?.company ?? attrs?.empresa ?? attrs?.Company ?? attrs?.Empresa;
