@@ -4,10 +4,19 @@
  *  El color sigue a la entidad — idéntico en ambos temas. */
 import { useEffect, useState } from "react";
 import { api, showError } from "../api";
+import { Select } from "../ui/Select";
 
 const C_IN = "#16a34a";
 const C_OUT = "#6366f1";
 
+const RANGES = [
+  { label: "Histórico", value: 0 },
+  { label: "7 días", value: 7 },
+  { label: "30 días", value: 30 },
+  { label: "90 días", value: 90 },
+];
+
+type PipelineLite = { id: string; name: string; isDefault: boolean };
 type Summary = {
   days: number;
   current: Record<string, number | null>;
@@ -34,20 +43,30 @@ function niceCeil(v: number): number {
 }
 
 export default function Analytics() {
-  const [days, setDays] = useState(30);
+  const [days, setDays] = useState(0);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [ts, setTs] = useState<TsPoint[]>([]);
   const [hours, setHours] = useState<HourPoint[]>([]);
   const [agents, setAgents] = useState<AgentRow[]>([]);
   const [funnel, setFunnel] = useState<FunnelStage[]>([]);
+  const [pipelines, setPipelines] = useState<PipelineLite[]>([]);
+  const [pipelineId, setPipelineId] = useState("");
 
   useEffect(() => {
+    api.get<{ items: PipelineLite[] }>("/pipelines").then((p) => {
+      setPipelines(p.items);
+      setPipelineId((cur) => cur || p.items.find((x) => x.isDefault)?.id || p.items[0]?.id || "");
+    }).catch(showError);
+  }, []);
+
+  useEffect(() => {
+    if (!pipelineId) return;
     Promise.all([
       api.get<Summary>(`/analytics/summary?days=${days}`),
       api.get<{ items: TsPoint[] }>(`/analytics/timeseries?days=${days}`),
       api.get<{ items: HourPoint[] }>(`/analytics/hourly?days=${days}`),
       api.get<{ items: AgentRow[] }>(`/analytics/agents?days=${days}`),
-      api.get<{ items: FunnelStage[] }>(`/analytics/funnel?days=${days}`),
+      api.get<{ items: FunnelStage[] }>(`/analytics/funnel?days=${days}&pipelineId=${pipelineId}`),
     ])
       .then(([s, t, h, a, f]) => {
         setSummary(s);
@@ -57,7 +76,7 @@ export default function Analytics() {
         setFunnel(f.items);
       })
       .catch(showError);
-  }, [days]);
+  }, [days, pipelineId]);
 
   if (!summary) return <div className="page">Cargando…</div>;
   const { current: c } = summary;
@@ -67,9 +86,9 @@ export default function Analytics() {
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 18 }}>
         <h2 style={{ margin: 0 }}>Analytics</h2>
         <div className="row" style={{ gap: 4 }}>
-          {[7, 30, 90].map((d) => (
-            <button key={d} className={days === d ? "primary" : ""} onClick={() => setDays(d)}>
-              {d} días
+          {RANGES.map((r) => (
+            <button key={r.value} className={days === r.value ? "primary" : ""} onClick={() => setDays(r.value)}>
+              {r.label}
             </button>
           ))}
         </div>
@@ -103,8 +122,18 @@ export default function Analytics() {
           <HourBars data={hours} />
         </div>
         <div className="chart-card">
-          <div className="chart-head"><h3>Embudo — entradas por etapa</h3></div>
-          <FunnelBars stages={funnel} />
+          <div className="chart-head">
+            <h3>Embudo — leads por etapa</h3>
+            {pipelines.length > 1 && (
+              <Select
+                style={{ width: 160 }}
+                value={pipelineId}
+                onChange={setPipelineId}
+                options={pipelines.map((p) => ({ value: p.id, label: `${p.name}${p.isDefault ? " ★" : ""}` }))}
+              />
+            )}
+          </div>
+          <FunnelBars stages={funnel} historic={days === 0} />
         </div>
       </div>
 
@@ -234,15 +263,16 @@ function HourBars({ data }: { data: HourPoint[] }) {
 
 /* ── Embudo del pipeline ────────────────────────────────────────────── */
 
-function FunnelBars({ stages }: { stages: FunnelStage[] }) {
+function FunnelBars({ stages, historic }: { stages: FunnelStage[]; historic: boolean }) {
   const flow = stages.filter((s) => !s.isTerminal);
   const terminal = stages.filter((s) => s.isTerminal);
   const max = Math.max(1, ...flow.map((s) => s.currentCount));
+  const countLabel = historic ? "actualmente" : "entraron a la etapa en el período";
 
   return (
     <div>
       {flow.map((s) => (
-        <div className="funnel-row" key={s.id} title={`${s.name}: ${s.currentCount} actualmente · ${s.enteredInPeriod} entradas en el período`}>
+        <div className="funnel-row" key={s.id} title={`${s.name}: ${s.currentCount} ${countLabel}`}>
           <span className="funnel-label">{s.name}</span>
           <div className="funnel-track">
             <div className="funnel-bar" style={{ width: `${Math.max(4, (s.currentCount / max) * 100)}%` }} />
@@ -265,7 +295,10 @@ function FunnelBars({ stages }: { stages: FunnelStage[] }) {
         </div>
       )}
       <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-        Cantidad de leads actualmente en cada etapa · % = conversión desde la etapa anterior (entradas en el período).
+        {historic
+          ? "Cantidad de leads actualmente en cada etapa (todo el historial)."
+          : "Leads que llegaron a su etapa actual dentro del período seleccionado."}
+        {" "}% = conversión desde la etapa anterior (entradas en el período).
       </p>
     </div>
   );

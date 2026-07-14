@@ -46,22 +46,40 @@ async def _count(db: AsyncSession, stmt) -> int:
     return (await db.execute(stmt)).scalar_one() or 0
 
 
-def _won_leads_in_window(start: datetime, end: datetime, outcome: str):
+def _since(now: datetime, days: int) -> datetime | None:
+    """days=0 es el sentinel de "Histórico": sin cota inferior de tiempo."""
+    return None if days == 0 else now - timedelta(days=days)
+
+
+def _current_stage_entered_at():
+    """Subquery: por lead, cuándo entró a su etapa actual (última transición).
+    Todo lead tiene ≥1 evento por construcción (create_lead siempre inserta uno)."""
+    return (
+        sa.select(LeadStageEvent.lead_id,
+                  sa.func.max(LeadStageEvent.created_at).label("entered_at"))
+        .group_by(LeadStageEvent.lead_id)
+        .subquery()
+    )
+
+
+def _won_leads_in_window(start: datetime | None, end: datetime, outcome: str):
     """Leads (distintos) que ENTRARON a una etapa terminal en la ventana."""
+    conds = [PipelineStage.outcome == outcome, LeadStageEvent.created_at < end]
+    if start is not None:
+        conds.append(LeadStageEvent.created_at >= start)
     return (
         sa.select(LeadStageEvent.lead_id)
         .join(PipelineStage, LeadStageEvent.to_stage_id == PipelineStage.id)
-        .where(
-            PipelineStage.outcome == outcome,
-            LeadStageEvent.created_at >= start,
-            LeadStageEvent.created_at < end,
-        )
+        .where(*conds)
         .distinct()
     )
 
 
-async def _window_metrics(db: AsyncSession, start: datetime, end: datetime) -> dict:
-    in_window = lambda col: sa.and_(col >= start, col < end)  # noqa: E731
+async def _window_metrics(db: AsyncSession, start: datetime | None, end: datetime) -> dict:
+    if start is None:
+        in_window = lambda col: col < end  # noqa: E731
+    else:
+        in_window = lambda col: sa.and_(col >= start, col < end)  # noqa: E731
 
     new_conversations = await _count(
         db, sa.select(sa.func.count()).where(in_window(Conversation.created_at)))
@@ -88,16 +106,17 @@ async def _window_metrics(db: AsyncSession, start: datetime, end: datetime) -> d
 
     # Primera respuesta: por conversación creada en la ventana,
     # min(entrante) → min(saliente posterior)
+    since_conds = [Message.created_at >= start] if start is not None else []
     fi = (
         sa.select(Message.conversation_id.label("cid"),
                   sa.func.min(Message.created_at).label("t"))
-        .where(Message.direction == _IN, Message.created_at >= start)
+        .where(Message.direction == _IN, *since_conds)
         .group_by(Message.conversation_id)
     ).subquery()
     fo = (
         sa.select(Message.conversation_id.label("cid"),
                   sa.func.min(Message.created_at).label("t"))
-        .where(Message.direction == _OUT, Message.created_at >= start)
+        .where(Message.direction == _OUT, *since_conds)
         .group_by(Message.conversation_id)
     ).subquery()
     rows = (await db.execute(
@@ -136,16 +155,16 @@ async def _window_metrics(db: AsyncSession, start: datetime, end: datetime) -> d
 
 @router.get("/summary")
 async def summary(
-    days: int = Query(30, ge=1, le=365),
+    days: int = Query(0, ge=0, le=3650),
     auth: AuthContext = Depends(require_permissions(perms.ANALYTICS_READ)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     now = datetime.now(UTC)
-    since = now - timedelta(days=days)
-    prev_since = since - timedelta(days=days)
+    since = _since(now, days)
 
     current = await _window_metrics(db, since, now)
-    previous = await _window_metrics(db, prev_since, since)
+    # Sin cota inferior (Histórico) no existe un "período anterior" válido.
+    previous = await _window_metrics(db, since - timedelta(days=days), since) if since else {}
 
     # Snapshot operativo: conversaciones esperando respuesta AHORA
     later_outbound = sa.select(Message.id).where(
@@ -159,11 +178,19 @@ async def summary(
         ~sa.exists(later_outbound),
     ))
 
-    # Snapshot operativo: leads actualmente en una etapa no terminal
-    open_leads = await _count(db, sa.select(sa.func.count())
+    # Leads actualmente en una etapa no terminal, cohorteados por cuándo
+    # entraron a esa etapa (regla consistente con funnel.currentCount).
+    entered_at = _current_stage_entered_at()
+    open_leads_stmt = (
+        sa.select(sa.func.count())
         .select_from(Lead)
         .join(PipelineStage, Lead.stage_id == PipelineStage.id)
-        .where(Lead.deleted_at.is_(None), PipelineStage.is_terminal.is_(False)))
+        .join(entered_at, entered_at.c.lead_id == Lead.id)
+        .where(Lead.deleted_at.is_(None), PipelineStage.is_terminal.is_(False))
+    )
+    if since is not None:
+        open_leads_stmt = open_leads_stmt.where(entered_at.c.entered_at >= since)
+    open_leads = await _count(db, open_leads_stmt)
 
     return {"days": days, "current": current, "previous": previous,
             "awaitingReply": awaiting, "openLeads": open_leads}
@@ -171,17 +198,24 @@ async def summary(
 
 @router.get("/timeseries")
 async def timeseries(
-    days: int = Query(30, ge=1, le=365),
+    days: int = Query(0, ge=0, le=3650),
     auth: AuthContext = Depends(require_permissions(perms.ANALYTICS_READ)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     now = datetime.now(UTC)
-    since = now - timedelta(days=days - 1)
-    start = since.replace(hour=0, minute=0, second=0, microsecond=0)
+    if days == 0:
+        # Histórico: el piso real es el mensaje más antiguo (o "ahora" si no hay ninguno).
+        floor = (await db.execute(sa.select(sa.func.min(Message.created_at)))).scalar_one_or_none() or now
+        start = floor.replace(hour=0, minute=0, second=0, microsecond=0)
+        n_days = (now.date() - start.date()).days + 1
+    else:
+        since = now - timedelta(days=days - 1)
+        start = since.replace(hour=0, minute=0, second=0, microsecond=0)
+        n_days = days
     day_col = sa.func.date_trunc("day", Message.created_at)
 
     by_day: dict[str, dict] = {}
-    for i in range(days):
+    for i in range(n_days):
         key = (start + timedelta(days=i)).date().isoformat()
         by_day[key] = {"date": key, "inbound": 0, "outbound": 0,
                        "newConversations": 0, "leadsCreated": 0}
@@ -219,17 +253,18 @@ async def timeseries(
 
 @router.get("/hourly")
 async def hourly(
-    days: int = Query(30, ge=1, le=365),
+    days: int = Query(0, ge=0, le=3650),
     auth: AuthContext = Depends(require_permissions(perms.ANALYTICS_READ)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Mensajes ENTRANTES por hora del día (horas UTC; el frontend las
     desplaza a la zona horaria local)."""
-    since = datetime.now(UTC) - timedelta(days=days)
+    since = _since(datetime.now(UTC), days)
     hour_col = sa.func.extract("hour", Message.created_at)
+    since_conds = [Message.created_at >= since] if since is not None else []
     rows = (await db.execute(
         sa.select(hour_col, sa.func.count())
-        .where(Message.direction == _IN, Message.created_at >= since)
+        .where(Message.direction == _IN, *since_conds)
         .group_by(hour_col)
     )).all()
     counts = {int(h): c for h, c in rows}
@@ -238,12 +273,12 @@ async def hourly(
 
 @router.get("/agents")
 async def agents(
-    days: int = Query(30, ge=1, le=365),
+    days: int = Query(0, ge=0, le=3650),
     auth: AuthContext = Depends(require_permissions(perms.ANALYTICS_READ)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     now = datetime.now(UTC)
-    since = now - timedelta(days=days)
+    since = _since(now, days)
     data: dict[uuid.UUID, dict] = {}
 
     def entry(user_id: uuid.UUID) -> dict:
@@ -252,9 +287,10 @@ async def agents(
             "leadsWon": 0, "wonValue": 0.0,
         })
 
+    since_conds = [Message.created_at >= since] if since is not None else []
     for user_id, count in (await db.execute(
         sa.select(Message.sent_by_user_id, sa.func.count())
-        .where(Message.sent_by_user_id.is_not(None), Message.created_at >= since)
+        .where(Message.sent_by_user_id.is_not(None), *since_conds)
         .group_by(Message.sent_by_user_id)
     )).all():
         entry(user_id)["outboundMessages"] = count
@@ -293,13 +329,13 @@ async def agents(
 
 @router.get("/funnel")
 async def funnel(
-    days: int = Query(30, ge=1, le=365),
+    days: int = Query(0, ge=0, le=3650),
     pipeline_id: uuid.UUID | None = Query(None, alias="pipelineId"),
     auth: AuthContext = Depends(require_permissions(perms.ANALYTICS_READ)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     now = datetime.now(UTC)
-    since = now - timedelta(days=days)
+    since = _since(now, days)
 
     if pipeline_id is None:
         pipeline = (await db.execute(
@@ -314,18 +350,27 @@ async def funnel(
         .order_by(PipelineStage.position)
     )).scalars().all()
 
-    current = {sid: c for sid, c in (await db.execute(
+    # currentCount: leads cuya etapa actual coincide con s.id, cohorteados por
+    # cuándo entraron a ella (misma regla que summary.openLeads).
+    entered_at = _current_stage_entered_at()
+    current_stmt = (
         sa.select(Lead.stage_id, sa.func.count())
+        .select_from(Lead)
+        .join(entered_at, entered_at.c.lead_id == Lead.id)
         .where(Lead.pipeline_id == pipeline.id, Lead.deleted_at.is_(None))
-        .group_by(Lead.stage_id)
+    )
+    if since is not None:
+        current_stmt = current_stmt.where(entered_at.c.entered_at >= since)
+    current = {sid: c for sid, c in (await db.execute(
+        current_stmt.group_by(Lead.stage_id)
     )).all()}
 
+    entered_conds = [LeadStageEvent.created_at >= since] if since is not None else []
     entered = {sid: c for sid, c in (await db.execute(
         sa.select(LeadStageEvent.to_stage_id,
                   sa.func.count(sa.func.distinct(LeadStageEvent.lead_id)))
         .join(PipelineStage, LeadStageEvent.to_stage_id == PipelineStage.id)
-        .where(PipelineStage.pipeline_id == pipeline.id,
-               LeadStageEvent.created_at >= since)
+        .where(PipelineStage.pipeline_id == pipeline.id, *entered_conds)
         .group_by(LeadStageEvent.to_stage_id)
     )).all()}
 
